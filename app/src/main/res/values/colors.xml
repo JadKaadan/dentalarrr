@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+
+    <!-- Dental App Colors -->
+    <color name="dental_primary">#FF2196F3</color>
+    <color name="dental_primary_dark">#FF1976D2</color>
+    <color name="dental_accent">#FF4CAF50</color>
+    <color name="dental_accent_dark">#FF388E3C</color>
+
+    <!-- Status Colors -->
+    <color name="tooth_pending">#FFFFC107</color>
+    <color name="tooth_placed">#FF4CAF50</color>
+    <color name="tooth_error">#FFF44336</color>
+
+    <!-- UI Colors -->
+    <color name="panel_background">#CC000000</color>
+    <color name="text_primary">#FFFFFF</color>
+    <color name="text_secondary">#E0E0E0</color>
+</resources>

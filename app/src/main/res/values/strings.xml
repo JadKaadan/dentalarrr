@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Dental AR Training</string>
+
+    <!-- Main Activity -->
+    <string name="scan_qr_code">Scan QR</string>
+    <string name="calibrate">Calibrate</string>
+    <string name="reset_session">Reset</string>
+    <string name="export_report">Export</string>
+    <string name="cancel">Cancel</string>
+
+    <!-- Calibration -->
+    <string name="calibration_title">Calibration</string>
+    <string name="calibration_instructions">Point camera at AprilTag marker\nnear the training jaw</string>
+
+    <!-- Guidance Messages -->
+    <string name="point_camera_at_jaw">Point camera at training jaw</string>
+    <string name="perfect_tolerance">Perfect! Within tolerance</string>
+    <string name="session_complete">Session complete! Export your results.</string>
+    <string name="dental_ar_ready">Dental AR Ready - Scan QR code to load project</string>
+
+    <!-- QR Scanner -->
+    <string name="scan_qr_title">Scan QR Code</string>
+    <string name="scan_qr_instructions">Point camera at project QR code</string>
+    <string name="toggle_flashlight">Toggle flashlight</string>
+    <string name="cancel_scan">Cancel scan</string>
+
+    <!-- Errors -->
+    <string name="camera_permission_required">Camera permission required for AR</string>
+    <string name="ar_not_supported">AR not supported on this device</string>
+    <string name="failed_to_load_project">Failed to load project</string>
+    <string name="invalid_qr_code">Invalid QR code format</string>
+    <string name="no_session_data">No session data to export</string>
+
+    <!-- Progress -->
+    <string name="progress_format">%1$d/%2$d</string>
+    <string name="tooth_number">Tooth #%1$s</string>
+
+    <!-- Reports -->
+    <string name="share_report">Share Report</string>
+    <string name="report_subject">Dental AR Training Report</string>
+    <string name="report_message">Training session report attached.</string>
+
+    <!-- Status -->
+    <string name="placed">✓ Placed</string>
+    <string name="pending">⏳ Pending</string>
+    <string name="error">✗ Error</string>
+
+    <!-- Movements -->
+    <string name="move_mesial">Move %1$.1fmm mesial</string>
+    <string name="move_distal">Move %1$.1fmm distal</string>
+    <string name="move_up">Move %1$.1fmm up</string>
+    <string name="move_down">Move %1$.1fmm down</string>
+    <string name="move_forward">Move %1$.1fmm forward</string>
+    <string name="move_back">Move %1$.1fmm back</string>
+    <string name="rotate_clockwise">Rotate %1$.1f° clockwise</string>
+    <string name="rotate_counterclockwise">Rotate %1$.1f° counterclockwise</string>
+</resources>
