@@ -10,7 +10,7 @@ import com.dentalapp.artraining.dao.ProjectDao
 import com.dentalapp.artraining.dao.SessionDao
 import com.dentalapp.artraining.data.entities.ProjectEntity
 import com.dentalapp.artraining.data.entities.SessionEntity
-import com.dentalapp.artraining.data.entities.UserPreferencesEntity
+import com.dentalapp.artraining.entities.UserPreferencesEntity
 import com.dentalapp.artraining.data.Converters
 
 @Database(
