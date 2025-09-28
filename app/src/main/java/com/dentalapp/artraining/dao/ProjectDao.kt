@@ -1,4 +1,4 @@
-package com.dentalapp.artraining.data.dao
+package com.dentalapp.artraining.dao
 
 import androidx.room.*
 import com.dentalapp.artraining.data.entities.ProjectEntity
@@ -6,40 +6,19 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface ProjectDao {
-
-    @Query("SELECT * FROM projects ORDER BY lastAccessedAt DESC")
+    @Query("SELECT * FROM projects ORDER BY lastAccessed DESC")
     fun getAllProjects(): Flow<List<ProjectEntity>>
 
-    @Query("SELECT * FROM projects WHERE id = :projectId")
-    suspend fun getProjectById(projectId: String): ProjectEntity?
-
-    @Query("SELECT * FROM projects WHERE id = :projectId")
-    fun getProjectByIdFlow(projectId: String): Flow<ProjectEntity?>
+    @Query("SELECT * FROM projects WHERE id = :id LIMIT 1")
+    suspend fun getProjectById(id: String): ProjectEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertProject(project: ProjectEntity)
+    suspend fun insertProject(entity: ProjectEntity)
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertProjects(projects: List<ProjectEntity>)
+    @Query("DELETE FROM projects WHERE id = :id")
+    suspend fun deleteProjectById(id: String)
 
-    @Update
-    suspend fun updateProject(project: ProjectEntity)
-
-    @Delete
-    suspend fun deleteProject(project: ProjectEntity)
-
-    @Query("DELETE FROM projects WHERE id = :projectId")
-    suspend fun deleteProjectById(projectId: String)
-
-    @Query("UPDATE projects SET lastAccessedAt = :timestamp WHERE id = :projectId")
-    suspend fun updateLastAccessed(projectId: String, timestamp: Long = System.currentTimeMillis())
-
-    @Query("SELECT COUNT(*) FROM projects")
-    suspend fun getProjectCount(): Int
-
-    @Query("SELECT * FROM projects WHERE name LIKE '%' || :searchQuery || '%' OR description LIKE '%' || :searchQuery || '%'")
-    fun searchProjects(searchQuery: String): Flow<List<ProjectEntity>>
-
-    @Query("DELETE FROM projects")
-    suspend fun deleteAllProjects()
+    // Touch lastAccessed (= now)
+    @Query("UPDATE projects SET lastAccessed = CAST(strftime('%s','now') AS INTEGER) * 1000 WHERE id = :id")
+    suspend fun updateLastAccessed(id: String)
 }
