@@ -1,4 +1,4 @@
-package com.dentalapp.artraining.data.entities
+package com.dentalapp.artraining.entities
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
