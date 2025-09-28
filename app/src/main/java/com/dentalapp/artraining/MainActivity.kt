@@ -13,15 +13,15 @@ import androidx.lifecycle.lifecycleScope
 import com.dentalapp.artraining.data.Project
 import com.dentalapp.artraining.data.ToothStatus
 import com.dentalapp.artraining.data.TrainingSession
+import com.dentalapp.artraining.data.database.AppDatabase
+import com.dentalapp.artraining.data.repository.DentalRepository
+import com.dentalapp.artraining.network.ApiService
+import com.dentalapp.artraining.reports.ReportGenerator
+import com.dentalapp.artraining.ar.DentalARManager
 import com.google.ar.core.ArCoreApk
 import com.google.ar.core.Config
 import com.google.ar.core.Session
 import com.google.ar.core.exceptions.*
-import com.dentalapp.artraining.data.database.DentalDatabase
-import com.dentalapp.artraining.data.database.DentalRepository
-import com.dentalapp.artraining.data.models.*
-import com.dentalapp.artraining.network.ApiService
-import com.dentalapp.artraining.reports.ReportGenerator
 import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
@@ -75,9 +75,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun initializeComponents() {
-        // Initialize database and repository
-        val database = DentalDatabase.getDatabase(this)
-        repository = DentalRepository(database)
+        // Initialize repository - fixed to use context
+        repository = DentalRepository(this)
 
         // Initialize network service
         apiService = ApiService()
@@ -277,7 +276,7 @@ class MainActivity : AppCompatActivity() {
                 showLoading(true)
 
                 // Try to get project from cache or API
-                val project = repository.getCachedProjectOrFetch(projectId, apiService)
+                val project = repository.getProject(projectId)
 
                 if (project != null) {
                     currentProject = project
