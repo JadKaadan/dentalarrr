@@ -2,13 +2,7 @@ package com.dentalapp.artraining.ar
 
 import android.content.Context
 import android.util.Log
-import com.dentalapp.artraining.data.Pose3D
-import com.dentalapp.artraining.data.PoseOffset
-import com.dentalapp.artraining.data.Project
-import com.dentalapp.artraining.data.Tolerance
-import com.dentalapp.artraining.data.ToothPlacement
-import com.dentalapp.artraining.data.ToothStatus
-import com.dentalapp.artraining.data.TrainingSession
+import com.dentalapp.artraining.data.*
 import com.google.ar.core.*
 import com.dentalapp.artraining.ml.ToothDetector
 import kotlinx.coroutines.*
@@ -219,7 +213,7 @@ class DentalARManager(
         val total = toothNodes.size
         onProgressUpdated?.invoke(completed, total)
 
-        if (completed == total) {
+        if (completed == total && total > 0) {
             completeSession()
         }
     }
@@ -280,11 +274,4 @@ data class SimpleToothNode(
     val tolerance: Tolerance,
     var currentOffset: PoseOffset? = null,
     var status: ToothStatus = ToothStatus.PENDING
-)
-
-// Simple Vector3D for pose offsets
-data class SimpleVector3D(
-    val x: Float,
-    val y: Float,
-    val z: Float
 )
