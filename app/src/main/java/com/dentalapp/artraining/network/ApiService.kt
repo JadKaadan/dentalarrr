@@ -1,6 +1,4 @@
 package com.dentalapp.artraining.network
-
-import com.dentalapp.artraining.data.models.*
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.*
