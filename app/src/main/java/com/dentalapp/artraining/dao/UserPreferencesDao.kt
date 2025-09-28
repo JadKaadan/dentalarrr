@@ -1,7 +1,7 @@
 package com.dentalapp.artraining.dao
 
 import androidx.room.*
-import com.dentalapp.artraining.data.entities.UserPreferencesEntity
+import com.dentalapp.artraining.entities.UserPreferencesEntity
 import kotlinx.coroutines.flow.Flow
 
 @Dao
