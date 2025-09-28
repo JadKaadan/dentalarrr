@@ -15,7 +15,10 @@ data class Project(
     val qrCode: String,
     val enabledTeeth: List<String>, // ["11", "12", "13", "21", "22", "23"]
     val idealPoses: Map<String, Pose3D>,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val description: String = "",
+    val updatedAt: Long = System.currentTimeMillis(),
+    val version: Int = 1
 )
 
 @Entity(tableName = "sessions")
@@ -228,8 +231,3 @@ class Converters {
         }
     }
 }
-
-
-
-
-
