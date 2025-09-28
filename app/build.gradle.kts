@@ -1,3 +1,4 @@
+// File: app/build.gradle.kts
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -37,12 +38,12 @@ android {
     }
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
 
     kotlinOptions {
-        jvmTarget = "11"
+        jvmTarget = "17"
     }
 
     buildFeatures {
@@ -72,13 +73,20 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
     implementation("androidx.activity:activity-ktx:1.8.2")
 
+    // Camera X for real camera preview
+    implementation("androidx.camera:camera-core:1.3.1")
+    implementation("androidx.camera:camera-camera2:1.3.1")
+    implementation("androidx.camera:camera-lifecycle:1.3.1")
+    implementation("androidx.camera:camera-video:1.3.1")
+    implementation("androidx.camera:camera-view:1.3.1")
+    implementation("androidx.camera:camera-extensions:1.3.1")
+
     // ARCore (without deprecated Sceneform)
     implementation("com.google.ar:core:1.41.0")
 
-    // Filament for 3D rendering (modern alternative to Sceneform)
-    implementation("com.google.android.filament:filament-android:1.17.1")
-    implementation("com.google.android.filament:gltfio-android:1.17.1")
-    implementation("com.google.android.filament:filament-utils-android:1.17.1")
+    implementation("com.google.android.filament:filament-android:1.54.3")
+    implementation("com.google.android.filament:gltfio-android:1.54.3")
+    implementation("com.google.android.filament:filament-utils-android:1.54.3")
 
     // Camera and QR Code scanning
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
@@ -109,7 +117,6 @@ dependencies {
 
     // Image loading
     implementation("com.github.bumptech.glide:glide:4.16.0")
-    kapt("com.github.bumptech.glide:compiler:4.16.0")
 
     // File I/O and PDF generation
     implementation("com.itextpdf:itextg:5.5.10")
