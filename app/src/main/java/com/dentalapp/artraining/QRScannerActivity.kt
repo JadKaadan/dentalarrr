@@ -190,5 +190,4 @@ class QRScannerActivity : AppCompatActivity() {
         super.onSaveInstanceState(outState)
         capture.onSaveInstanceState(outState)
     }
-    
 }
