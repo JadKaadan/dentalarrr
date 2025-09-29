@@ -105,7 +105,7 @@ dependencies {
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
-    // JSON parsing
+    // JSON parsing - Gson (already included above, but keeping here for clarity)
     implementation("com.google.code.gson:gson:2.10.1")
 
     // Room Database for local storage
@@ -147,6 +147,9 @@ dependencies {
 
     // Math utilities
     implementation("org.apache.commons:commons-math3:3.6.1")
+
+    // NOTE: OpenGL ES is built into Android SDK - no separate dependency needed
+    // OpenGL ES 3.0 is available on API 18+ (we're using API 24+)
 
     // Testing
     testImplementation(libs.junit)
