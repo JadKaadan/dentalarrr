@@ -14,6 +14,13 @@
     <color name="tooth_placed">#FF4CAF50</color>
     <color name="tooth_error">#FFF44336</color>
 
+    // In colors.xml
+    <color name="tooth_detected">#FF4CAF50</color>  // Green
+    <color name="bracket_placed">#FF2196F3</color>  // Blue
+    <color name="warning">#FFFFC107</color>         // Amber
+    <color name="error">#FFF44336</color>           // Red
+
+
     <!-- UI Colors -->
     <color name="panel_background">#CC000000</color>
     <color name="text_primary">#FFFFFF</color>
