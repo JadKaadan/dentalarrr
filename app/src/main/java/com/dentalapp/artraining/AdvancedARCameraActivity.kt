@@ -19,7 +19,6 @@ import com.dentalapp.artraining.ar.AdvancedARRenderer
 import com.dentalapp.artraining.data.BracketPlacement
 import com.dentalapp.artraining.data.PatientSession
 import com.dentalapp.artraining.ml.AdvancedToothDetector
-import com.dentalapp.artraining.utils.QRCodeGenerator
 import com.google.ar.core.*
 import com.google.ar.core.exceptions.*
 import kotlinx.coroutines.launch
@@ -27,6 +26,8 @@ import java.util.*
 import android.os.VibrationEffect
 import android.os.Vibrator
 import com.dentalapp.artraining.ar.OBJLoader
+import com.dentalapp.artraining.utils.QRCodeGenerator
+import android.content.Context
 
 class AdvancedARCameraActivity : AppCompatActivity() {
 
@@ -525,16 +526,19 @@ class AdvancedARCameraActivity : AppCompatActivity() {
         toothDetector.cleanup()
     }
 
-    private fun playPlacementSound() {
-        val mediaPlayer = MediaPlayer.create(this, R.raw.placement_success)
-        mediaPlayer.start()
-        mediaPlayer.setOnCompletionListener { it.release() }
-    }
+
 
 
     private fun vibrateOnPlacement() {
         val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
-        vibrator.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE))
+
+        // Use API-level-safe vibration
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            vibrator.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE))
+        } else {
+            @Suppress("DEPRECATION")
+            vibrator.vibrate(50)
+        }
     }
 
 
