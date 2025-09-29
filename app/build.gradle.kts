@@ -84,9 +84,10 @@ dependencies {
     // ARCore (without deprecated Sceneform)
     implementation("com.google.ar:core:1.41.0")
 
-    implementation("com.google.android.filament:filament-android:1.54.3")
-    implementation("com.google.android.filament:gltfio-android:1.54.3")
-    implementation("com.google.android.filament:filament-utils-android:1.54.3")
+    // Filament for 3D rendering - FIXED VERSION
+    implementation("com.google.android.filament:filament-android:1.45.0")
+    implementation("com.google.android.filament:gltfio-android:1.45.0")
+    implementation("com.google.android.filament:filament-utils-android:1.45.0")
 
     // Camera and QR Code scanning
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
