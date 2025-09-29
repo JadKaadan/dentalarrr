@@ -22,6 +22,9 @@ import com.google.ar.core.ArCoreApk
 import com.google.ar.core.Config
 import com.google.ar.core.Session
 import com.google.ar.core.exceptions.*
+import android.opengl.GLES30
+import android.opengl.GLSurfaceView
+import android.opengl.Matrix
 import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
