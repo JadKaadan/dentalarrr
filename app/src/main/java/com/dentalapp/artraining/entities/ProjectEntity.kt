@@ -4,8 +4,8 @@ import androidx.room.Entity
 import androidx.room.PrimaryKey
 import com.dentalapp.artraining.data.*
 
-// This mirrors the domain model + includes lastAccessed
-@Entity(tableName = "projects")
+// This entity is for caching projects with additional metadata
+@Entity(tableName = "project_cache")
 data class ProjectEntity(
     @PrimaryKey val id: String,
     val name: String,
@@ -18,8 +18,24 @@ data class ProjectEntity(
     val createdAt: Long,
     val updatedAt: Long = System.currentTimeMillis(),
     val version: Int = 1,
-    val lastAccessed: Long = System.currentTimeMillis()
+    val lastAccessed: Long = System.currentTimeMillis()  // This is for caching purposes only
 ) {
+    fun toProject(): Project {
+        return Project(
+            id = id,
+            name = name,
+            description = description,
+            archType = archType,
+            tolerance = tolerance,
+            qrCode = qrCode,
+            enabledTeeth = enabledTeeth,
+            idealPoses = idealPoses,
+            createdAt = createdAt,
+            updatedAt = updatedAt,
+            version = version
+        )
+    }
+
     companion object {
         fun fromProject(project: Project): ProjectEntity {
             return ProjectEntity(
@@ -34,9 +50,8 @@ data class ProjectEntity(
                 createdAt = project.createdAt,
                 updatedAt = project.updatedAt,
                 version = project.version,
-                lastAccessed = project.lastAccessed
+                lastAccessed = System.currentTimeMillis()
             )
         }
     }
 }
-
