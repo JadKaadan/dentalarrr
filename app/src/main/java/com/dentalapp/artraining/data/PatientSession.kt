@@ -36,7 +36,7 @@ data class BracketPlacement(
     val toothId: String,
     val pose: Pose,
     val timestamp: Long,
-    val offsetMm: AdvancedToothDetector.Vector3,
+    val offsetMm: com.dentalapp.artraining.ml.AdvancedToothDetector.Vector3,
     val confidence: Float = 1.0f,
     val isVerified: Boolean = false
 ) {
