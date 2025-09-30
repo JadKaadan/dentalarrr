@@ -11,7 +11,7 @@ android {
 
     defaultConfig {
         applicationId = "com.dentalapp.artraining"
-        minSdk = 24  // ARCore requires API level 24+
+        minSdk = 26  // ARCore requires API level 24+
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
@@ -84,10 +84,9 @@ dependencies {
     // ARCore (without deprecated Sceneform)
     implementation("com.google.ar:core:1.41.0")
 
-    // Filament for 3D rendering - FIXED VERSION
-    implementation("com.google.android.filament:filament-android:1.45.0")
-    implementation("com.google.android.filament:gltfio-android:1.45.0")
-    implementation("com.google.android.filament:filament-utils-android:1.45.0")
+    implementation("com.google.android.filament:filament-android:1.51.6")
+    implementation("com.google.android.filament:gltfio-android:1.51.6")
+    implementation("com.google.android.filament:filament-utils-android:1.51.6")
 
     // Camera and QR Code scanning
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
