@@ -110,7 +110,7 @@ class AdvancedARCameraActivity : AppCompatActivity() {
         lifecycleScope.launch {
             try {
                 // Load the OBJ file from assets
-                val inputStream = assets.open("models/bracket.obj")
+                val inputStream = assets.open("models/Bracket.obj")
                 bracketModel = OBJLoader.loadOBJ(inputStream)
                 Log.d(TAG, "Bracket model loaded: ${bracketModel?.vertices?.size} vertices")
             } catch (e: Exception) {
