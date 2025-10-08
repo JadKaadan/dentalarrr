@@ -1,65 +1,127 @@
-<?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools"
-    package="com.dentalapp.artraining">
-    <!-- ARCore requires camera permission -->
-    <uses-permission android:name="android.permission.CAMERA" /> <!-- ARCore requires OpenGL ES 3.0 -->
-    <uses-feature
-        android:glEsVersion="0x00030000"
-        android:required="true" /> <!-- ARCore requires rear-facing camera -->
-    <uses-feature
-        android:name="android.hardware.camera"
-        android:required="true" /> <!-- ARCore requires depth sensor (optional for basic functionality) -->
-    <uses-feature
-        android:name="android.hardware.camera.ar"
-        android:required="false" /> <!-- Internet permission for API calls and model downloads -->
-    <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" /> <!-- Storage permissions for caching models and exporting reports -->
-    <uses-permission
-        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
-        android:maxSdkVersion="28" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" /> <!-- Vibration for haptic feedback -->
-    <uses-permission android:name="android.permission.VIBRATE" />
+plugins {
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
+    id("com.google.devtools.ksp")
+    id("org.jetbrains.kotlin.kapt")
 
-    <application
-        android:allowBackup="true"
-        android:dataExtractionRules="@xml/data_extraction_rules"
-        android:fullBackupContent="@xml/backup_rules"
-        android:icon="@mipmap/ic_launcher"
-        android:label="@string/app_name"
-        android:theme="@style/Theme.DentalAR"
-        tools:targetApi="31">
-        <activity
-            android:name=".AdvancedARCameraActivity"
-            android:exported="true"
-            android:screenOrientation="portrait"
-            android:theme="@style/Theme.DentalAR.NoActionBar">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
+}
 
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
-        <!-- ARCore metadata -->
-        <meta-data
-            android:name="com.google.ar.core"
-            android:value="required" /> <!-- Main AR Activity -->
+android {
+    namespace = "com.dentalapp.artraining"
+    compileSdk = 34
 
-        <activity
-            android:name=".QRScannerActivity"
-            android:exported="false"
-            android:screenOrientation="portrait"
-            android:theme="@style/Theme.DentalAR.NoActionBar" /> <!-- Project Selection Activity -->
-        <!-- File Provider for sharing reports -->
-        <provider
-            android:name="androidx.core.content.FileProvider"
-            android:authorities="${applicationId}.fileprovider"
-            android:exported="false"
-            android:grantUriPermissions="true">
-            <meta-data
-                android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/file_paths" />
-        </provider>
-    </application>
+    defaultConfig {
+        applicationId = "com.dentalapp.artraining"
+        minSdk = 26
+        targetSdk = 34
+        versionCode = 1
+        versionName = "1.0"
 
-</manifest>
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Enable multidex for large dependencies
+        multiDexEnabled = true
+
+        // Optimize for ARM and ARM64
+        ndk {
+            abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a"))
+        }
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
+        debug {
+            isMinifyEnabled = false
+            isDebuggable = true
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
+    }
+
+    kotlinOptions {
+        jvmTarget = "21"
+    }
+
+    buildFeatures {
+        viewBinding = true
+        buildConfig = true
+    }
+
+    packaging {
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += "META-INF/DEPENDENCIES"
+        }
+    }
+
+}
+
+dependencies {
+    // Core Android
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.appcompat)
+    implementation(libs.material)
+    implementation(libs.androidx.activity)
+    implementation(libs.androidx.constraintlayout)
+
+    // ARCore
+    implementation("com.google.ar:core:1.41.0")
+    implementation("com.google.ar.sceneform:core:1.22.0")
+
+    // TensorFlow Lite with GPU support
+    implementation("org.tensorflow:tensorflow-lite:2.14.0")
+    implementation("org.tensorflow:tensorflow-lite-gpu:2.14.0")
+    implementation("org.tensorflow:tensorflow-lite-support:0.4.4")
+
+    // Networking
+    implementation("com.squareup.retrofit2:retrofit:2.9.0")
+    implementation("com.squareup.retrofit2:converter-gson:2.9.0")
+    implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
+    implementation("com.google.code.gson:gson:2.10.1")
+
+    // Room Database
+    implementation("androidx.room:room-runtime:2.6.1")
+    implementation("androidx.room:room-ktx:2.6.1")
+    kapt("androidx.room:room-compiler:2.6.1")
+
+
+    // Coroutines
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
+
+    // Lifecycle
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0")
+    implementation("androidx.lifecycle:lifecycle-livedata-ktx:2.7.0")
+
+    // QR Code Scanner
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+    implementation("com.google.zxing:core:3.5.2")
+
+    // WorkManager for background tasks
+    implementation("androidx.work:work-runtime-ktx:2.9.0")
+
+    // Image loading
+    implementation("com.github.bumptech.glide:glide:4.16.0")
+
+    // CardView
+    implementation("androidx.cardview:cardview:1.0.0")
+
+    // Multidex
+    implementation("androidx.multidex:multidex:2.0.1")
+
+    // Testing
+    testImplementation(libs.junit)
+    androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.androidx.espresso.core)
+}
