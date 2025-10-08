@@ -3,9 +3,9 @@ package com.dentalapp.artraining
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.media.MediaPlayer
 import android.os.Bundle
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.util.Log
 import android.view.MotionEvent
 import android.view.View
@@ -16,17 +16,16 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.dentalapp.artraining.ar.AdvancedARRenderer
+import com.dentalapp.artraining.ar.OBJLoader
 import com.dentalapp.artraining.data.BracketPlacement
 import com.dentalapp.artraining.data.PatientSession
 import com.dentalapp.artraining.ml.AdvancedToothDetector
+import com.dentalapp.artraining.utils.QRCodeGenerator
 import com.google.ar.core.*
 import com.google.ar.core.exceptions.*
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.*
-import android.os.VibrationEffect
-import android.os.Vibrator
-import com.dentalapp.artraining.ar.OBJLoader
-import com.dentalapp.artraining.utils.QRCodeGenerator
 import android.content.Context
 
 class AdvancedARCameraActivity : AppCompatActivity() {
@@ -34,6 +33,7 @@ class AdvancedARCameraActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "AdvancedARCamera"
         private const val CAMERA_PERMISSION_CODE = 100
+        private const val MIN_OPENGL_VERSION = 3.0
     }
 
     // AR Core
@@ -55,13 +55,15 @@ class AdvancedARCameraActivity : AppCompatActivity() {
     private lateinit var tvInstructions: TextView
     private lateinit var tvToothInfo: TextView
     private lateinit var tvPlacementCount: TextView
+    private lateinit var tvFeedback: TextView
     private lateinit var layoutControls: LinearLayout
+    private lateinit var progressBar: ProgressBar
 
     // Session Data
     private var patientName: String = ""
     private val bracketPlacements = mutableListOf<BracketPlacement>()
-    private var selectedToothId: String? = null
     private var isCameraActive = false
+    private var isDetecting = false
 
     // Touch handling
     private var lastTapTime = 0L
@@ -70,6 +72,12 @@ class AdvancedARCameraActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_advanced_arcamera)
+
+        if (!checkOpenGLVersion()) {
+            showError("OpenGL ES 3.0 is required but not supported")
+            finish()
+            return
+        }
 
         initializeUI()
         loadBracketModel()
@@ -80,6 +88,12 @@ class AdvancedARCameraActivity : AppCompatActivity() {
         }
     }
 
+    private fun checkOpenGLVersion(): Boolean {
+        val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        val configInfo = activityManager.deviceConfigurationInfo
+        return configInfo.reqGlEsVersion >= MIN_OPENGL_VERSION
+    }
+
     private fun initializeUI() {
         surfaceView = findViewById(R.id.ar_surface_view)
         btnStartCamera = findViewById(R.id.btn_start_camera)
@@ -88,7 +102,9 @@ class AdvancedARCameraActivity : AppCompatActivity() {
         tvInstructions = findViewById(R.id.tv_instructions)
         tvToothInfo = findViewById(R.id.tv_tooth_info)
         tvPlacementCount = findViewById(R.id.tv_placement_count)
+        tvFeedback = findViewById<TextView>(R.id.tv_instructions) // Reusing for feedback
         layoutControls = findViewById(R.id.layout_controls)
+        progressBar = findViewById(R.id.loading_indicator)
 
         btnStartCamera.setOnClickListener { startCameraSession() }
         btnSaveSession.setOnClickListener { savePatientSession() }
@@ -98,10 +114,13 @@ class AdvancedARCameraActivity : AppCompatActivity() {
         layoutControls.visibility = View.GONE
         btnSaveSession.isEnabled = false
         btnUndo.isEnabled = false
+        progressBar.visibility = View.GONE
 
         // Touch listener for tooth selection
         surfaceView.setOnTouchListener { _, event ->
-            handleTouch(event)
+            if (isCameraActive) {
+                handleTouch(event)
+            }
             true
         }
     }
@@ -109,19 +128,39 @@ class AdvancedARCameraActivity : AppCompatActivity() {
     private fun loadBracketModel() {
         lifecycleScope.launch {
             try {
-                // Load the OBJ file from assets
+                showProgress(true, "Loading 3D model...")
+
                 val inputStream = assets.open("models/Bracket.obj")
                 bracketModel = OBJLoader.loadOBJ(inputStream)
+
                 Log.d(TAG, "Bracket model loaded: ${bracketModel?.vertices?.size} vertices")
+                showProgress(false)
+
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to load bracket model", e)
-                showError("Failed to load 3D bracket model")
+                showError("Failed to load 3D bracket model. Using placeholder.")
+                showProgress(false)
             }
         }
     }
 
     private fun initializeMLDetector() {
-        toothDetector = AdvancedToothDetector(this)
+        try {
+            toothDetector = AdvancedToothDetector(this)
+
+            if (toothDetector.isUsingPlaceholder()) {
+                Toast.makeText(
+                    this,
+                    "Using simulation mode - waiting for trained model",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+
+            Log.d(TAG, "Tooth detector initialized")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to initialize detector", e)
+            showError("ML detector initialization failed")
+        }
     }
 
     private fun checkCameraPermission(): Boolean {
@@ -147,16 +186,15 @@ class AdvancedARCameraActivity : AppCompatActivity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == CAMERA_PERMISSION_CODE) {
             if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                // Permission granted
+                Log.d(TAG, "Camera permission granted")
             } else {
-                showError("Camera permission required")
+                showError("Camera permission required for AR functionality")
                 finish()
             }
         }
     }
 
     private fun startCameraSession() {
-        // Prompt for patient name first
         showPatientNameDialog()
     }
 
@@ -177,90 +215,158 @@ class AdvancedARCameraActivity : AppCompatActivity() {
                 }
             }
             .setNegativeButton("Cancel", null)
+            .setCancelable(false)
             .show()
     }
 
     private fun initializeARSession() {
-        try {
-            // Check ARCore availability
-            when (ArCoreApk.getInstance().requestInstall(this, !shouldConfigureSession)) {
-                ArCoreApk.InstallStatus.INSTALL_REQUESTED -> {
-                    shouldConfigureSession = true
-                    return
+        lifecycleScope.launch {
+            try {
+                showProgress(true, "Initializing AR...")
+
+                // Check ARCore availability
+                when (ArCoreApk.getInstance().requestInstall(this@AdvancedARCameraActivity, !shouldConfigureSession)) {
+                    ArCoreApk.InstallStatus.INSTALL_REQUESTED -> {
+                        shouldConfigureSession = true
+                        showProgress(false)
+                        return@launch
+                    }
+                    ArCoreApk.InstallStatus.INSTALLED -> {
+                        // Continue
+                    }
                 }
-                ArCoreApk.InstallStatus.INSTALLED -> {
-                    // Continue
+
+                // Create AR session
+                arSession = Session(this@AdvancedARCameraActivity).apply {
+                    val config = Config(this).apply {
+                        depthMode = Config.DepthMode.AUTOMATIC
+                        planeFindingMode = Config.PlaneFindingMode.DISABLED
+                        lightEstimationMode = Config.LightEstimationMode.ENVIRONMENTAL_HDR
+                        focusMode = Config.FocusMode.AUTO
+                    }
+                    configure(config)
+
+                    // Get camera intrinsics for ML detector
+                    val camera = this.cameraConfig
+                    val intrinsics = camera.textureIntrinsics
+                    toothDetector.setCameraIntrinsics(
+                        intrinsics.focalLength[0],
+                        intrinsics.focalLength[1],
+                        intrinsics.principalPoint[0],
+                        intrinsics.principalPoint[1]
+                    )
                 }
+
+                // Initialize renderer
+                arRenderer = AdvancedARRenderer(this@AdvancedARCameraActivity, arSession!!, bracketModel)
+                surfaceView.apply {
+                    preserveEGLContextOnPause = true
+                    setEGLContextClientVersion(3)
+                    setEGLConfigChooser(8, 8, 8, 8, 16, 0)
+                    setRenderer(arRenderer)
+                    renderMode = android.opengl.GLSurfaceView.RENDERMODE_CONTINUOUSLY
+                }
+
+                isCameraActive = true
+                layoutControls.visibility = View.VISIBLE
+                btnStartCamera.visibility = View.GONE
+                showProgress(false)
+
+                tvInstructions.text = "Point camera at teeth. Tap to place bracket."
+
+                // Start detection loop
+                startToothDetectionLoop()
+
+                Log.d(TAG, "AR session initialized successfully")
+
+            } catch (e: UnavailableArcoreNotInstalledException) {
+                Log.e(TAG, "ARCore not installed", e)
+                showError("Please install ARCore from Google Play Store")
+            } catch (e: UnavailableUserDeclinedInstallationException) {
+                Log.e(TAG, "User declined ARCore", e)
+                showError("ARCore installation required")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to initialize AR", e)
+                showError("AR initialization failed: ${e.message}")
             }
-
-            // Create AR session
-            arSession = Session(this).apply {
-                val config = Config(this).apply {
-                    depthMode = Config.DepthMode.AUTOMATIC
-                    planeFindingMode = Config.PlaneFindingMode.DISABLED
-                    lightEstimationMode = Config.LightEstimationMode.ENVIRONMENTAL_HDR
-                    focusMode = Config.FocusMode.AUTO
-                }
-                configure(config)
-            }
-
-            // Initialize renderer
-            arRenderer = AdvancedARRenderer(this, arSession!!, bracketModel)
-            surfaceView.preserveEGLContextOnPause = true
-            surfaceView.setEGLContextClientVersion(3)
-            surfaceView.setEGLConfigChooser(8, 8, 8, 8, 16, 0)
-            surfaceView.setRenderer(arRenderer)
-            surfaceView.renderMode = android.opengl.GLSurfaceView.RENDERMODE_CONTINUOUSLY
-
-            isCameraActive = true
-            layoutControls.visibility = View.VISIBLE
-            btnStartCamera.visibility = View.GONE
-
-            tvInstructions.text = "Point camera at teeth. Tap on a tooth to place bracket."
-
-            // Start detection loop
-            startToothDetectionLoop()
-
-            Log.d(TAG, "AR session initialized successfully")
-
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to initialize AR session", e)
-            showError("Failed to start AR: ${e.message}")
         }
     }
 
     private fun startToothDetectionLoop() {
+        isDetecting = true
+
         lifecycleScope.launch {
-            while (isCameraActive) {
+            var frameCount = 0
+
+            while (isCameraActive && isDetecting) {
                 try {
                     arSession?.let { session ->
                         val frame = session.update()
                         val camera = frame.camera
 
                         if (camera.trackingState == TrackingState.TRACKING) {
-                            // Get camera image
-                            val image = frame.acquireCameraImage()
+                            // Detect teeth every 10 frames (~3 fps) to reduce load
+                            if (frameCount % 10 == 0) {
+                                try {
+                                    val image = frame.acquireCameraImage()
 
-                            // Detect teeth
-                            val detectedTeeth = toothDetector.detectTeeth(image)
+                                    // Detect teeth
+                                    val detectedTeeth = toothDetector.detectTeeth(image)
 
-                            // Update renderer with detected teeth
-                            arRenderer.updateDetectedTeeth(detectedTeeth)
+                                    // Update renderer
+                                    arRenderer.updateDetectedTeeth(detectedTeeth)
 
-                            // Update UI
-                            runOnUiThread {
-                                tvToothInfo.text = "Detected: ${detectedTeeth.size} teeth"
+                                    // Update UI
+                                    runOnUiThread {
+                                        updateDetectionUI(detectedTeeth)
+                                    }
+
+                                    image.close()
+                                } catch (e: NotYetAvailableException) {
+                                    // Image not ready, skip this frame
+                                }
                             }
 
-                            image.close()
+                            frameCount++
                         }
                     }
 
-                    kotlinx.coroutines.delay(100) // 10 FPS detection
+                    delay(33) // ~30 FPS main loop
+
                 } catch (e: Exception) {
                     Log.e(TAG, "Detection error", e)
+                    delay(100) // Wait before retry
                 }
             }
+        }
+    }
+
+    private fun updateDetectionUI(teeth: List<AdvancedToothDetector.DetectedTooth>) {
+        val teethCount = teeth.size
+        val teethIds = teeth.joinToString(", ") { it.toothId }
+
+        tvToothInfo.text = if (teethCount > 0) {
+            "Detected: $teethCount teeth ($teethIds)"
+        } else {
+            "No teeth detected - point camera at teeth"
+        }
+
+        // Update feedback for placed brackets
+        val placedBrackets = arRenderer.getPlacedBrackets()
+        val bestFeedback = placedBrackets.values.mapNotNull { it.positionFeedback }.minByOrNull { it.distance }
+
+        bestFeedback?.let { feedback ->
+            val color = when (feedback.quality) {
+                AdvancedToothDetector.QualityLevel.PERFECT -> "#4CAF50"
+                AdvancedToothDetector.QualityLevel.GOOD -> "#2196F3"
+                AdvancedToothDetector.QualityLevel.ACCEPTABLE -> "#FFC107"
+                else -> "#F44336"
+            }
+
+            tvInstructions.text = android.text.Html.fromHtml(
+                "<font color='$color'>${feedback.guidance}</font>",
+                android.text.Html.FROM_HTML_MODE_LEGACY
+            )
         }
     }
 
@@ -268,21 +374,20 @@ class AdvancedARCameraActivity : AppCompatActivity() {
         if (event.action == MotionEvent.ACTION_DOWN) {
             val currentTime = System.currentTimeMillis()
             if (currentTime - lastTapTime < TAP_THRESHOLD) {
-                // Double tap - ignore
-                return
+                return // Ignore double tap
             }
             lastTapTime = currentTime
 
-            // Get tap coordinates
             val x = event.x
             val y = event.y
 
-            // Perform hit test on detected teeth
+            // Hit test on detected teeth
             val hitTooth = arRenderer.hitTestTooth(x, y, surfaceView.width, surfaceView.height)
 
             if (hitTooth != null) {
-                selectedToothId = hitTooth.toothId
                 showBracketPlacementDialog(hitTooth)
+            } else {
+                Toast.makeText(this, "Tap on a detected tooth", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -301,42 +406,44 @@ class AdvancedARCameraActivity : AppCompatActivity() {
             .setPositiveButton("Place") { _, _ ->
                 placeBracketOnTooth(tooth)
             }
-            .setNegativeButton("Cancel") { _, _ ->
-                selectedToothId = null
-            }
+            .setNegativeButton("Cancel", null)
             .show()
     }
 
     private fun placeBracketOnTooth(tooth: AdvancedToothDetector.DetectedTooth) {
         try {
-            // Calculate ideal bracket placement
-            val placementPose = calculateBracketPlacement(tooth)
+            // Create anchor at optimal bracket position
+            val optimalPos = tooth.optimalBracketPosition
+            val pose = Pose(
+                floatArrayOf(optimalPos.x, optimalPos.y, optimalPos.z),
+                floatArrayOf(0f, 0f, 0f, 1f) // Neutral rotation
+            )
 
-            // Create anchor at placement position
             arSession?.let { session ->
-                val anchor = session.createAnchor(placementPose)
-
-                // Add bracket to renderer
+                val anchor = session.createAnchor(pose)
                 val bracketId = UUID.randomUUID().toString()
+
+                // Add to renderer
                 arRenderer.addBracket(bracketId, anchor, tooth.toothId)
 
                 // Save placement data
                 val placement = BracketPlacement(
                     id = bracketId,
                     toothId = tooth.toothId,
-                    pose = placementPose,
+                    pose = pose,
                     timestamp = System.currentTimeMillis(),
-                    offsetMm = calculateOffset(tooth, placementPose)
+                    offsetMm = AdvancedToothDetector.Vector3(0f, 0f, 0f), // Initial offset
+                    confidence = tooth.confidence
                 )
                 bracketPlacements.add(placement)
 
                 // Update UI
                 updatePlacementCount()
-                btnSaveSession.isEnabled = bracketPlacements.isNotEmpty()
-                btnUndo.isEnabled = bracketPlacements.isNotEmpty()
+                btnSaveSession.isEnabled = true
+                btnUndo.isEnabled = true
 
-                // Show guidance
-                showPlacementGuidance(placement)
+                // Haptic feedback
+                vibrateOnPlacement()
 
                 Log.d(TAG, "Bracket placed on tooth ${tooth.toothId}")
             }
@@ -347,83 +454,8 @@ class AdvancedARCameraActivity : AppCompatActivity() {
         }
     }
 
-    private fun calculateBracketPlacement(tooth: AdvancedToothDetector.DetectedTooth): Pose {
-        // Calculate ideal bracket position based on tooth surface
-        val toothCenter = tooth.pose.position
-
-        // Offset bracket slightly outward from tooth surface (1mm)
-        val offsetDistance = 0.001f // 1mm in meters
-
-        // Calculate normal direction (pointing outward from tooth)
-        val normal = tooth.surfaceNormal
-
-        val bracketPosition = floatArrayOf(
-            toothCenter.x + normal.x * offsetDistance,
-            toothCenter.y + normal.y * offsetDistance,
-            toothCenter.z + normal.z * offsetDistance
-        )
-
-        // Calculate rotation to align bracket with tooth surface
-        val rotation = calculateBracketRotation(normal)
-
-        return Pose(bracketPosition, rotation)
-    }
-
-    private fun calculateBracketRotation(normal: AdvancedToothDetector.Vector3): FloatArray {
-        // Create rotation quaternion to align bracket with surface normal
-        // This is simplified - in production, use proper quaternion math
-
-        val up = floatArrayOf(0f, 1f, 0f)
-        val right = crossProduct(up, floatArrayOf(normal.x, normal.y, normal.z))
-        val newUp = crossProduct(floatArrayOf(normal.x, normal.y, normal.z), right)
-
-        // Convert to quaternion (simplified)
-        return floatArrayOf(0f, 0f, 0f, 1f) // Identity rotation for now
-    }
-
-    private fun crossProduct(a: FloatArray, b: FloatArray): FloatArray {
-        return floatArrayOf(
-            a[1] * b[2] - a[2] * b[1],
-            a[2] * b[0] - a[0] * b[2],
-            a[0] * b[1] - a[1] * b[0]
-        )
-    }
-
-    private fun calculateOffset(
-        tooth: AdvancedToothDetector.DetectedTooth,
-        placementPose: Pose
-    ): AdvancedToothDetector.Vector3 {
-        // Calculate offset in mm from ideal position
-        val idealPos = tooth.pose.position
-        val actualPos = placementPose.translation
-
-        return AdvancedToothDetector.Vector3(
-            (actualPos[0] - idealPos.x) * 1000, // Convert to mm
-            (actualPos[1] - idealPos.y) * 1000,
-            (actualPos[2] - idealPos.z) * 1000
-        )
-    }
-
-    private fun showPlacementGuidance(placement: BracketPlacement) {
-        val offset = placement.offsetMm
-        val totalOffset = kotlin.math.sqrt(
-            offset.x * offset.x + offset.y * offset.y + offset.z * offset.z
-        )
-
-        val guidance = if (totalOffset < 0.5f) {
-            "✓ Perfect placement! (${String.format("%.2f", totalOffset)}mm offset)"
-        } else if (totalOffset < 1.0f) {
-            "✓ Good placement (${String.format("%.2f", totalOffset)}mm offset)"
-        } else {
-            "⚠ Adjust placement (${String.format("%.2f", totalOffset)}mm offset)"
-        }
-
-        tvInstructions.text = guidance
-        Toast.makeText(this, guidance, Toast.LENGTH_SHORT).show()
-    }
-
     private fun updatePlacementCount() {
-        tvPlacementCount.text = "Brackets placed: ${bracketPlacements.size}"
+        tvPlacementCount.text = "Brackets: ${bracketPlacements.size}"
     }
 
     private fun undoLastPlacement() {
@@ -446,7 +478,8 @@ class AdvancedARCameraActivity : AppCompatActivity() {
         }
 
         try {
-            // Create patient session
+            showProgress(true, "Saving session...")
+
             val session = PatientSession(
                 id = UUID.randomUUID().toString(),
                 patientName = patientName,
@@ -458,11 +491,12 @@ class AdvancedARCameraActivity : AppCompatActivity() {
             // Generate QR code
             val qrCodeBitmap = QRCodeGenerator.generateQRCode(session)
 
-            // Show save dialog
+            showProgress(false)
             showSaveDialog(session, qrCodeBitmap)
 
         } catch (e: Exception) {
             Log.e(TAG, "Failed to save session", e)
+            showProgress(false)
             showError("Failed to save session: ${e.message}")
         }
     }
@@ -480,26 +514,43 @@ class AdvancedARCameraActivity : AppCompatActivity() {
         """.trimIndent()
 
         AlertDialog.Builder(this)
-            .setTitle("Session Saved")
+            .setTitle("Session Saved Successfully")
             .setView(dialogView)
-            .setPositiveButton("Share QR") { _, _ ->
-                shareQRCode(qrCodeBitmap, session)
-            }
-            .setNegativeButton("Done") { _, _ ->
+            .setPositiveButton("Done") { _, _ ->
                 finish()
             }
+            .setCancelable(false)
             .show()
     }
 
-    private fun shareQRCode(qrCode: Bitmap, session: PatientSession) {
-        // Save QR code and share
-        // Implementation details...
-        Toast.makeText(this, "QR code saved", Toast.LENGTH_SHORT).show()
+    private fun vibrateOnPlacement() {
+        try {
+            val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                vibrator.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE))
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(50)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Vibration failed", e)
+        }
+    }
+
+    private fun showProgress(show: Boolean, message: String = "") {
+        runOnUiThread {
+            progressBar.visibility = if (show) View.VISIBLE else View.GONE
+            if (show && message.isNotEmpty()) {
+                tvInstructions.text = message
+            }
+        }
     }
 
     private fun showError(message: String) {
-        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
-        Log.e(TAG, message)
+        runOnUiThread {
+            Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+            Log.e(TAG, message)
+        }
     }
 
     override fun onResume() {
@@ -510,36 +561,31 @@ class AdvancedARCameraActivity : AppCompatActivity() {
         } catch (e: CameraNotAvailableException) {
             Log.e(TAG, "Camera not available", e)
             showError("Camera not available")
+        } catch (e: Exception) {
+            Log.e(TAG, "Resume error", e)
         }
     }
 
     override fun onPause() {
         super.onPause()
-        surfaceView.onPause()
-        arSession?.pause()
+        try {
+            surfaceView.onPause()
+            arSession?.pause()
+        } catch (e: Exception) {
+            Log.e(TAG, "Pause error", e)
+        }
     }
 
     override fun onDestroy() {
         super.onDestroy()
         isCameraActive = false
-        arSession?.close()
-        toothDetector.cleanup()
-    }
+        isDetecting = false
 
-
-
-
-    private fun vibrateOnPlacement() {
-        val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
-
-        // Use API-level-safe vibration
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-            vibrator.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE))
-        } else {
-            @Suppress("DEPRECATION")
-            vibrator.vibrate(50)
+        try {
+            arSession?.close()
+            toothDetector.cleanup()
+        } catch (e: Exception) {
+            Log.e(TAG, "Cleanup error", e)
         }
     }
-
-
 }
