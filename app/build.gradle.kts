@@ -1,159 +1,65 @@
-// File: app/build.gradle.kts
-plugins {
-    alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
-    id("kotlin-kapt")
-}
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    package="com.dentalapp.artraining">
+    <!-- ARCore requires camera permission -->
+    <uses-permission android:name="android.permission.CAMERA" /> <!-- ARCore requires OpenGL ES 3.0 -->
+    <uses-feature
+        android:glEsVersion="0x00030000"
+        android:required="true" /> <!-- ARCore requires rear-facing camera -->
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="true" /> <!-- ARCore requires depth sensor (optional for basic functionality) -->
+    <uses-feature
+        android:name="android.hardware.camera.ar"
+        android:required="false" /> <!-- Internet permission for API calls and model downloads -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" /> <!-- Storage permissions for caching models and exporting reports -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" /> <!-- Vibration for haptic feedback -->
+    <uses-permission android:name="android.permission.VIBRATE" />
 
-android {
-    namespace = "com.dentalapp.artraining"
-    compileSdk = 34
+    <application
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:theme="@style/Theme.DentalAR"
+        tools:targetApi="31">
+        <activity
+            android:name=".AdvancedARCameraActivity"
+            android:exported="true"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.DentalAR.NoActionBar">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
 
-    defaultConfig {
-        applicationId = "com.dentalapp.artraining"
-        minSdk = 26  // ARCore requires API level 24+
-        targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <!-- ARCore metadata -->
+        <meta-data
+            android:name="com.google.ar.core"
+            android:value="required" /> <!-- Main AR Activity -->
 
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        <activity
+            android:name=".QRScannerActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.DentalAR.NoActionBar" /> <!-- Project Selection Activity -->
+        <!-- File Provider for sharing reports -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+    </application>
 
-        // Enable vector drawables
-        vectorDrawables.useSupportLibrary = true
-    }
-
-    buildTypes {
-        release {
-            isMinifyEnabled = true
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
-
-            buildConfigField("Boolean", "DEBUG_MODE", "false")
-        }
-        debug {
-            buildConfigField("Boolean", "DEBUG_MODE", "true")
-        }
-    }
-
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
-
-    kotlinOptions {
-        jvmTarget = "17"
-    }
-
-    buildFeatures {
-        buildConfig = true
-        viewBinding = true
-    }
-
-    packaging {
-        resources {
-            pickFirsts += listOf(
-                "**/libc++_shared.so",
-                "**/libjsc.so",
-                "**/libarcore_sdk_c.so",
-                "**/libarcore_sdk_jni.so"
-            )
-        }
-    }
-}
-
-dependencies {
-    // AndroidX Core
-    implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.appcompat)
-    implementation(libs.material)
-    implementation(libs.androidx.activity)
-    implementation(libs.androidx.constraintlayout)
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
-    implementation("androidx.activity:activity-ktx:1.8.2")
-
-    // Camera X for real camera preview
-    implementation("androidx.camera:camera-core:1.3.1")
-    implementation("androidx.camera:camera-camera2:1.3.1")
-    implementation("androidx.camera:camera-lifecycle:1.3.1")
-    implementation("androidx.camera:camera-video:1.3.1")
-    implementation("androidx.camera:camera-view:1.3.1")
-    implementation("androidx.camera:camera-extensions:1.3.1")
-
-    // ARCore (without deprecated Sceneform)
-    implementation("com.google.ar:core:1.41.0")
-
-    implementation("com.google.android.filament:filament-android:1.51.6")
-    implementation("com.google.android.filament:gltfio-android:1.51.6")
-    implementation("com.google.android.filament:filament-utils-android:1.51.6")
-
-    // Camera and QR Code scanning
-    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
-    implementation("com.google.zxing:core:3.5.2")
-
-    // TensorFlow Lite for ML models
-    implementation("org.tensorflow:tensorflow-lite:2.14.0")
-    implementation("org.tensorflow:tensorflow-lite-gpu:2.14.0")
-    implementation("org.tensorflow:tensorflow-lite-support:0.4.4")
-    implementation("org.tensorflow:tensorflow-lite-metadata:0.4.4")
-
-    // Networking
-    implementation("com.squareup.retrofit2:retrofit:2.9.0")
-    implementation("com.squareup.retrofit2:converter-gson:2.9.0")
-    implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
-
-    // JSON parsing - Gson (already included above, but keeping here for clarity)
-    implementation("com.google.code.gson:gson:2.10.1")
-
-    // Room Database for local storage
-    implementation("androidx.room:room-runtime:2.6.1")
-    implementation("androidx.room:room-ktx:2.6.1")
-    kapt("androidx.room:room-compiler:2.6.1")
-
-    // WorkManager for background tasks
-    implementation("androidx.work:work-runtime-ktx:2.9.0")
-
-    // Image loading
-    implementation("com.github.bumptech.glide:glide:4.16.0")
-
-    // File I/O and PDF generation
-    implementation("com.itextpdf:itextg:5.5.10")
-
-    // Permissions
-    implementation("com.karumi:dexter:6.2.3")
-
-    // Logging
-    implementation("com.jakewharton.timber:timber:5.0.1")
-
-    // Coroutines
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
-
-    // ViewModel and LiveData
-    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0")
-    implementation("androidx.lifecycle:lifecycle-livedata-ktx:2.7.0")
-
-    // Fragment
-    implementation("androidx.fragment:fragment-ktx:1.6.2")
-
-    // RecyclerView (for lists)
-    implementation("androidx.recyclerview:recyclerview:1.3.2")
-
-    // Card View
-    implementation("androidx.cardview:cardview:1.0.0")
-
-    // Math utilities
-    implementation("org.apache.commons:commons-math3:3.6.1")
-
-    // NOTE: OpenGL ES is built into Android SDK - no separate dependency needed
-    // OpenGL ES 3.0 is available on API 18+ (we're using API 24+)
-
-    // Testing
-    testImplementation(libs.junit)
-    androidTestImplementation(libs.androidx.junit)
-    androidTestImplementation(libs.androidx.espresso.core)
-    androidTestImplementation("androidx.room:room-testing:2.6.1")
-    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
-}
+</manifest>
