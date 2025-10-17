@@ -15,6 +15,7 @@ import java.nio.ByteOrder
 import java.nio.FloatBuffer
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
+import kotlin.math.sqrt
 
 class AdvancedARRenderer(
     private val context: Context,
@@ -31,13 +32,13 @@ class AdvancedARRenderer(
         private val COLOR_GOOD = floatArrayOf(0.3f, 0.7f, 0.9f, 0.6f) // Blue
         private val COLOR_NEEDS_ADJUSTMENT = floatArrayOf(1.0f, 0.7f, 0.2f, 0.6f) // Orange
         private val COLOR_ERROR = floatArrayOf(1.0f, 0.3f, 0.3f, 0.6f) // Red
+        private val COLOR_SELECTED = floatArrayOf(1.0f, 0.0f, 1.0f, 0.8f) // Magenta
     }
 
     // Rendering components
     private var backgroundRenderer: BackgroundRenderer? = null
     private var bracketRenderer: BracketRenderer? = null
     private var overlayRenderer: ToothOverlayRenderer? = null
-    private var measurementRenderer: MeasurementRenderer? = null
 
     // Detected teeth and placed brackets
     private var detectedTeeth = listOf<AdvancedToothDetector.DetectedTooth>()
@@ -51,13 +52,17 @@ class AdvancedARRenderer(
     private var frameCount = 0
     private var lastFpsTime = System.currentTimeMillis()
 
+    // Selection
+    private var selectedBracketId: String? = null
+
     data class PlacedBracket(
         val id: String,
         val anchor: Anchor,
         val toothId: String,
         var detectedTooth: AdvancedToothDetector.DetectedTooth?,
         var modelMatrix: FloatArray = FloatArray(16),
-        var positionFeedback: AdvancedToothDetector.PositionFeedback? = null
+        var positionFeedback: AdvancedToothDetector.PositionFeedback? = null,
+        var isSelected: Boolean = false
     )
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
@@ -75,9 +80,6 @@ class AdvancedARRenderer(
 
             overlayRenderer = ToothOverlayRenderer()
             overlayRenderer?.createOnGlThread()
-
-            measurementRenderer = MeasurementRenderer()
-            measurementRenderer?.createOnGlThread()
 
             Log.d(TAG, "OpenGL renderers initialized successfully")
         } catch (e: Exception) {
@@ -109,13 +111,10 @@ class AdvancedARRenderer(
             backgroundRenderer?.draw(frame)
 
             // Draw tooth overlays
-            drawToothOverlays(frame)
+            drawToothOverlays()
 
             // Draw placed brackets
-            drawPlacedBrackets(frame)
-
-            // Draw measurements and guidance
-            drawMeasurements(frame)
+            drawPlacedBrackets()
 
             // Update FPS
             updateFPS()
@@ -125,7 +124,7 @@ class AdvancedARRenderer(
         }
     }
 
-    private fun drawToothOverlays(frame: Frame) {
+    private fun drawToothOverlays() {
         detectedTeeth.forEach { tooth ->
             // Determine overlay color based on bracket placement
             val bracket = placedBrackets.values.find { it.toothId == tooth.toothId }
@@ -159,7 +158,7 @@ class AdvancedARRenderer(
         }
     }
 
-    private fun drawPlacedBrackets(frame: Frame) {
+    private fun drawPlacedBrackets() {
         GLES30.glEnable(GLES30.GL_DEPTH_TEST)
         GLES30.glDepthMask(true)
 
@@ -169,12 +168,15 @@ class AdvancedARRenderer(
                 val anchorPose = bracket.anchor.pose
                 anchorPose.toMatrix(bracket.modelMatrix, 0)
 
-                // Determine bracket color based on position feedback
-                val color = when (bracket.positionFeedback?.quality) {
-                    AdvancedToothDetector.QualityLevel.PERFECT -> COLOR_PERFECT
-                    AdvancedToothDetector.QualityLevel.GOOD -> COLOR_GOOD
-                    AdvancedToothDetector.QualityLevel.ACCEPTABLE -> COLOR_NEEDS_ADJUSTMENT
-                    else -> COLOR_ERROR
+                // Determine bracket color based on selection and position feedback
+                val color = when {
+                    bracket.id == selectedBracketId -> COLOR_SELECTED
+                    else -> when (bracket.positionFeedback?.quality) {
+                        AdvancedToothDetector.QualityLevel.PERFECT -> COLOR_PERFECT
+                        AdvancedToothDetector.QualityLevel.GOOD -> COLOR_GOOD
+                        AdvancedToothDetector.QualityLevel.ACCEPTABLE -> COLOR_NEEDS_ADJUSTMENT
+                        else -> COLOR_ERROR
+                    }
                 }
 
                 // Draw the bracket
@@ -184,28 +186,6 @@ class AdvancedARRenderer(
                     projectionMatrix = projectionMatrix,
                     color = color
                 )
-            }
-        }
-    }
-
-    private fun drawMeasurements(frame: Frame) {
-        placedBrackets.values.forEach { bracket ->
-            bracket.positionFeedback?.let { feedback ->
-                bracket.detectedTooth?.let { tooth ->
-                    // Draw distance measurement
-                    measurementRenderer?.drawDistanceMeasurement(
-                        from = tooth.optimalBracketPosition,
-                        to = AdvancedToothDetector.Vector3(
-                            bracket.modelMatrix[12],
-                            bracket.modelMatrix[13],
-                            bracket.modelMatrix[14]
-                        ),
-                        distance = feedback.distance,
-                        quality = feedback.quality,
-                        viewMatrix = viewMatrix,
-                        projectionMatrix = projectionMatrix
-                    )
-                }
             }
         }
     }
@@ -243,7 +223,7 @@ class AdvancedARRenderer(
         val yOffset = (current.y - optimal.y) * 1000f
         val zOffset = (current.z - optimal.z) * 1000f
 
-        val distance = kotlin.math.sqrt(
+        val distance = sqrt(
             xOffset * xOffset + yOffset * yOffset + zOffset * zOffset
         )
 
@@ -284,6 +264,9 @@ class AdvancedARRenderer(
 
     fun removeBracket(id: String) {
         placedBrackets.remove(id)?.anchor?.detach()
+        if (selectedBracketId == id) {
+            selectedBracketId = null
+        }
         Log.d(TAG, "Bracket removed: $id")
     }
 
@@ -305,6 +288,87 @@ class AdvancedARRenderer(
         }
     }
 
+    fun hitTestBracket(
+        x: Float,
+        y: Float,
+        screenWidth: Int,
+        screenHeight: Int
+    ): String? {
+        // Convert screen coordinates to normalized device coordinates
+        val normalizedX = (x / screenWidth) * 2f - 1f
+        val normalizedY = -((y / screenHeight) * 2f - 1f)
+
+        // Find closest bracket to touch point
+        var closestBracket: String? = null
+        var closestDistance = Float.MAX_VALUE
+
+        placedBrackets.forEach { (id, bracket) ->
+            if (bracket.anchor.trackingState == TrackingState.TRACKING) {
+                // Project bracket position to screen
+                val mvpMatrix = FloatArray(16)
+                val mvMatrix = FloatArray(16)
+                Matrix.multiplyMM(mvMatrix, 0, viewMatrix, 0, bracket.modelMatrix, 0)
+                Matrix.multiplyMM(mvpMatrix, 0, projectionMatrix, 0, mvMatrix, 0)
+
+                // Get bracket center in world space
+                val worldPos = floatArrayOf(bracket.modelMatrix[12], bracket.modelMatrix[13], bracket.modelMatrix[14], 1f)
+                val screenPos = FloatArray(4)
+                Matrix.multiplyMV(screenPos, 0, mvpMatrix, 0, worldPos, 0)
+
+                if (screenPos[3] != 0f) {
+                    val screenX = screenPos[0] / screenPos[3]
+                    val screenY = screenPos[1] / screenPos[3]
+
+                    val distance = sqrt((screenX - normalizedX) * (screenX - normalizedX) +
+                            (screenY - normalizedY) * (screenY - normalizedY))
+
+                    if (distance < 0.15f && distance < closestDistance) { // 15% of screen tolerance
+                        closestDistance = distance
+                        closestBracket = id
+                    }
+                }
+            }
+        }
+
+        return closestBracket
+    }
+
+    fun updateBracketTransform(bracketId: String, transform: AdvancedToothDetector.BracketTransform) {
+        placedBrackets[bracketId]?.let { bracket ->
+            // Create transformation matrix
+            val transformMatrix = FloatArray(16)
+            Matrix.setIdentityM(transformMatrix, 0)
+
+            // Apply translation
+            Matrix.translateM(transformMatrix, 0, transform.position.x, transform.position.y, transform.position.z)
+
+            // Apply rotations
+            Matrix.rotateM(transformMatrix, 0, transform.rotation.x, 1f, 0f, 0f)
+            Matrix.rotateM(transformMatrix, 0, transform.rotation.y, 0f, 1f, 0f)
+            Matrix.rotateM(transformMatrix, 0, transform.rotation.z, 0f, 0f, 1f)
+
+            // Apply scale
+            val normalizedScale = transform.scale / 4f // Normalize to reasonable size
+            Matrix.scaleM(transformMatrix, 0, normalizedScale, normalizedScale, normalizedScale)
+
+            // Update model matrix
+            System.arraycopy(transformMatrix, 0, bracket.modelMatrix, 0, 16)
+        }
+    }
+
+    fun selectBracket(bracketId: String?) {
+        // Deselect previous
+        selectedBracketId?.let { prevId ->
+            placedBrackets[prevId]?.isSelected = false
+        }
+
+        // Select new
+        selectedBracketId = bracketId
+        bracketId?.let { id ->
+            placedBrackets[id]?.isSelected = true
+        }
+    }
+
     fun getPlacedBrackets(): Map<String, PlacedBracket> = placedBrackets.toMap()
 
     private fun updateFPS() {
@@ -318,10 +382,11 @@ class AdvancedARRenderer(
         }
     }
 
-    // Background renderer for camera feed
+    // Simple background renderer for camera feed
     private class BackgroundRenderer {
         private var program = 0
         private var textureId = -1
+        private var vertexBuffer: FloatBuffer? = null
 
         fun createOnGlThread(context: Context) {
             val vertexShader = """
@@ -346,101 +411,37 @@ class AdvancedARRenderer(
 
             program = createProgram(vertexShader, fragmentShader)
 
+            // Create fullscreen quad
+            val vertices = floatArrayOf(
+                -1f, -1f, 0f, 1f,
+                1f, -1f, 1f, 1f,
+                -1f,  1f, 0f, 0f,
+                1f,  1f, 1f, 0f
+            )
+
+            vertexBuffer = createFloatBuffer(vertices)
+
             val textures = IntArray(1)
             GLES30.glGenTextures(1, textures, 0)
             textureId = textures[0]
         }
 
         fun draw(frame: Frame) {
+            // Simple implementation - would need proper background rendering for production
             GLES30.glDisable(GLES30.GL_DEPTH_TEST)
             GLES30.glUseProgram(program)
-            // Background rendering implementation
+            // Background rendering implementation would go here
         }
     }
 
-    // Bracket renderer
+    // Simple bracket renderer
     private class BracketRenderer {
         private var program = 0
         private var vertexBuffer: FloatBuffer? = null
-        private var normalBuffer: FloatBuffer? = null
         private var indexBuffer: java.nio.IntBuffer? = null
         private var numIndices = 0
 
         fun createOnGlThread(model: OBJLoader.OBJModel?) {
-            val vertexShader = """
-                uniform mat4 u_MVP;
-                attribute vec4 a_Position;
-                attribute vec3 a_Normal;
-                varying vec3 v_Normal;
-                void main() {
-                    v_Normal = a_Normal;
-                    gl_Position = u_MVP * a_Position;
-                }
-            """.trimIndent()
-
-            val fragmentShader = """
-                precision mediump float;
-                uniform vec4 u_Color;
-                varying vec3 v_Normal;
-                void main() {
-                    vec3 lightDir = normalize(vec3(0.5, 1.0, 0.5));
-                    float diffuse = max(dot(normalize(v_Normal), lightDir), 0.4);
-                    gl_FragColor = vec4(u_Color.rgb * diffuse, u_Color.a);
-                }
-            """.trimIndent()
-
-            program = createProgram(vertexShader, fragmentShader)
-
-            model?.let {
-                vertexBuffer = createFloatBuffer(it.vertices)
-                normalBuffer = createFloatBuffer(it.normals)
-                indexBuffer = createIntBuffer(it.indices)
-                numIndices = it.indices.size
-            }
-        }
-
-        fun draw(
-            modelMatrix: FloatArray,
-            viewMatrix: FloatArray,
-            projectionMatrix: FloatArray,
-            color: FloatArray
-        ) {
-            if (vertexBuffer == null) return
-
-            GLES30.glUseProgram(program)
-
-            // Calculate MVP
-            val mvp = FloatArray(16)
-            val mv = FloatArray(16)
-            Matrix.multiplyMM(mv, 0, viewMatrix, 0, modelMatrix, 0)
-            Matrix.multiplyMM(mvp, 0, projectionMatrix, 0, mv, 0)
-
-            val mvpHandle = GLES30.glGetUniformLocation(program, "u_MVP")
-            GLES30.glUniformMatrix4fv(mvpHandle, 1, false, mvp, 0)
-
-            val colorHandle = GLES30.glGetUniformLocation(program, "u_Color")
-            GLES30.glUniform4fv(colorHandle, 1, color, 0)
-
-            val posHandle = GLES30.glGetAttribLocation(program, "a_Position")
-            GLES30.glEnableVertexAttribArray(posHandle)
-            GLES30.glVertexAttribPointer(posHandle, 3, GLES30.GL_FLOAT, false, 0, vertexBuffer)
-
-            val normHandle = GLES30.glGetAttribLocation(program, "a_Normal")
-            GLES30.glEnableVertexAttribArray(normHandle)
-            GLES30.glVertexAttribPointer(normHandle, 3, GLES30.GL_FLOAT, false, 0, normalBuffer)
-
-            GLES30.glDrawElements(GLES30.GL_TRIANGLES, numIndices, GLES30.GL_UNSIGNED_INT, indexBuffer)
-
-            GLES30.glDisableVertexAttribArray(posHandle)
-            GLES30.glDisableVertexAttribArray(normHandle)
-        }
-    }
-
-    // Tooth overlay renderer
-    private class ToothOverlayRenderer {
-        private var program = 0
-
-        fun createOnGlThread() {
             val vertexShader = """
                 uniform mat4 u_MVP;
                 attribute vec4 a_Position;
@@ -458,6 +459,74 @@ class AdvancedARRenderer(
             """.trimIndent()
 
             program = createProgram(vertexShader, fragmentShader)
+
+            if (model != null) {
+                vertexBuffer = createFloatBuffer(model.vertices)
+                indexBuffer = createIntBuffer(model.indices)
+                numIndices = model.indices.size
+            } else {
+                // Create simple cube as fallback
+                val vertices = floatArrayOf(
+                    -0.002f, -0.002f, -0.002f,
+                    0.002f, -0.002f, -0.002f,
+                    0.002f,  0.002f, -0.002f,
+                    -0.002f,  0.002f, -0.002f,
+                    -0.002f, -0.002f,  0.002f,
+                    0.002f, -0.002f,  0.002f,
+                    0.002f,  0.002f,  0.002f,
+                    -0.002f,  0.002f,  0.002f
+                )
+                val indices = intArrayOf(
+                    0, 1, 2, 2, 3, 0, // Front
+                    4, 5, 6, 6, 7, 4, // Back
+                    0, 1, 5, 5, 4, 0, // Bottom
+                    2, 3, 7, 7, 6, 2, // Top
+                    0, 3, 7, 7, 4, 0, // Left
+                    1, 2, 6, 6, 5, 1  // Right
+                )
+
+                vertexBuffer = createFloatBuffer(vertices)
+                indexBuffer = createIntBuffer(indices)
+                numIndices = indices.size
+            }
+        }
+
+        fun draw(
+            modelMatrix: FloatArray,
+            viewMatrix: FloatArray,
+            projectionMatrix: FloatArray,
+            color: FloatArray
+        ) {
+            if (vertexBuffer == null) return
+
+            GLES30.glUseProgram(program)
+
+            // Calculate MVP matrix
+            val mvp = FloatArray(16)
+            val mv = FloatArray(16)
+            Matrix.multiplyMM(mv, 0, viewMatrix, 0, modelMatrix, 0)
+            Matrix.multiplyMM(mvp, 0, projectionMatrix, 0, mv, 0)
+
+            val mvpHandle = GLES30.glGetUniformLocation(program, "u_MVP")
+            GLES30.glUniformMatrix4fv(mvpHandle, 1, false, mvp, 0)
+
+            val colorHandle = GLES30.glGetUniformLocation(program, "u_Color")
+            GLES30.glUniform4fv(colorHandle, 1, color, 0)
+
+            val posHandle = GLES30.glGetAttribLocation(program, "a_Position")
+            GLES30.glEnableVertexAttribArray(posHandle)
+            GLES30.glVertexAttribPointer(posHandle, 3, GLES30.GL_FLOAT, false, 0, vertexBuffer)
+
+            GLES30.glDrawElements(GLES30.GL_TRIANGLES, numIndices, GLES30.GL_UNSIGNED_INT, indexBuffer)
+
+            GLES30.glDisableVertexAttribArray(posHandle)
+        }
+    }
+
+    // Simple tooth overlay renderer
+    private class ToothOverlayRenderer {
+        fun createOnGlThread() {
+            // Initialize overlay rendering
         }
 
         fun drawToothOverlay(
@@ -466,9 +535,7 @@ class AdvancedARRenderer(
             viewMatrix: FloatArray,
             projectionMatrix: FloatArray
         ) {
-            // Draw bounding box around detected tooth
-            val box = tooth.boundingBox
-            // Implementation for drawing 3D overlay box
+            // Draw bounding box overlay - simplified implementation
         }
 
         fun drawOptimalPosition(
@@ -476,26 +543,7 @@ class AdvancedARRenderer(
             viewMatrix: FloatArray,
             projectionMatrix: FloatArray
         ) {
-            // Draw a small marker at optimal bracket position
-        }
-    }
-
-    // Measurement renderer
-    private class MeasurementRenderer {
-        fun createOnGlThread() {
-            // Initialize measurement rendering
-        }
-
-        fun drawDistanceMeasurement(
-            from: AdvancedToothDetector.Vector3,
-            to: AdvancedToothDetector.Vector3,
-            distance: Float,
-            quality: AdvancedToothDetector.QualityLevel,
-            viewMatrix: FloatArray,
-            projectionMatrix: FloatArray
-        ) {
-            // Draw line from optimal position to current position
-            // Show distance text
+            // Draw optimal position marker - simplified implementation
         }
     }
 }
