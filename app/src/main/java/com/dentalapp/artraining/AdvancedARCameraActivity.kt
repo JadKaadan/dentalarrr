@@ -7,8 +7,7 @@ import android.os.Bundle
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.util.Log
-import android.view.MotionEvent
-import android.view.View
+import android.view.*
 import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -27,6 +26,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.*
 import android.content.Context
+import kotlin.math.*
 
 class AdvancedARCameraActivity : AppCompatActivity() {
 
@@ -34,6 +34,12 @@ class AdvancedARCameraActivity : AppCompatActivity() {
         private const val TAG = "AdvancedARCamera"
         private const val CAMERA_PERMISSION_CODE = 100
         private const val MIN_OPENGL_VERSION = 3.0
+
+        // Touch gesture constants
+        private const val TOUCH_TOLERANCE = 50f
+        private const val ROTATION_SCALE = 0.5f
+        private const val SCALE_SENSITIVITY = 0.01f
+        private const val MOVE_SENSITIVITY = 0.001f
     }
 
     // AR Core
@@ -52,12 +58,19 @@ class AdvancedARCameraActivity : AppCompatActivity() {
     private lateinit var btnStartCamera: Button
     private lateinit var btnSaveSession: Button
     private lateinit var btnUndo: Button
+    private lateinit var btnManipulateMode: Button
     private lateinit var tvInstructions: TextView
     private lateinit var tvToothInfo: TextView
     private lateinit var tvPlacementCount: TextView
-    private lateinit var tvFeedback: TextView
+    private lateinit var tvManipulationInfo: TextView
     private lateinit var layoutControls: LinearLayout
+    private lateinit var layoutManipulation: LinearLayout
     private lateinit var progressBar: ProgressBar
+
+    // Manipulation Controls
+    private lateinit var seekBarScale: SeekBar
+    private lateinit var btnResetTransform: Button
+    private lateinit var tvScaleValue: TextView
 
     // Session Data
     private var patientName: String = ""
@@ -65,9 +78,19 @@ class AdvancedARCameraActivity : AppCompatActivity() {
     private var isCameraActive = false
     private var isDetecting = false
 
-    // Touch handling
+    // Touch handling and manipulation
     private var lastTapTime = 0L
     private val TAP_THRESHOLD = 300L
+    private var isManipulationMode = false
+    private var selectedBracketId: String? = null
+    private var bracketTransforms = mutableMapOf<String, AdvancedToothDetector.BracketTransform>()
+
+    // Gesture detection
+    private var lastTouchX = 0f
+    private var lastTouchY = 0f
+    private var initialDistance = 0f
+    private var isScaling = false
+    private var isRotating = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -80,6 +103,7 @@ class AdvancedARCameraActivity : AppCompatActivity() {
         }
 
         initializeUI()
+        setupManipulationControls()
         loadBracketModel()
         initializeMLDetector()
 
@@ -99,29 +123,67 @@ class AdvancedARCameraActivity : AppCompatActivity() {
         btnStartCamera = findViewById(R.id.btn_start_camera)
         btnSaveSession = findViewById(R.id.btn_save_session)
         btnUndo = findViewById(R.id.btn_undo)
+        btnManipulateMode = findViewById(R.id.btn_manipulate_mode)
         tvInstructions = findViewById(R.id.tv_instructions)
         tvToothInfo = findViewById(R.id.tv_tooth_info)
         tvPlacementCount = findViewById(R.id.tv_placement_count)
-        tvFeedback = findViewById<TextView>(R.id.tv_instructions) // Reusing for feedback
+        tvManipulationInfo = findViewById(R.id.tv_manipulation_info)
         layoutControls = findViewById(R.id.layout_controls)
+        layoutManipulation = findViewById(R.id.layout_manipulation)
         progressBar = findViewById(R.id.loading_indicator)
 
         btnStartCamera.setOnClickListener { startCameraSession() }
         btnSaveSession.setOnClickListener { savePatientSession() }
         btnUndo.setOnClickListener { undoLastPlacement() }
+        btnManipulateMode.setOnClickListener { toggleManipulationMode() }
 
         // Initially hide controls
         layoutControls.visibility = View.GONE
+        layoutManipulation.visibility = View.GONE
         btnSaveSession.isEnabled = false
         btnUndo.isEnabled = false
+        btnManipulateMode.isEnabled = false
         progressBar.visibility = View.GONE
 
-        // Touch listener for tooth selection
+        // Setup touch listener with gesture detection
         surfaceView.setOnTouchListener { _, event ->
             if (isCameraActive) {
                 handleTouch(event)
             }
             true
+        }
+    }
+
+    private fun setupManipulationControls() {
+        seekBarScale = findViewById(R.id.seekbar_scale)
+        btnResetTransform = findViewById(R.id.btn_reset_transform)
+        tvScaleValue = findViewById(R.id.tv_scale_value)
+
+        // Scale control
+        seekBarScale.max = 100
+        seekBarScale.progress = 50 // Default size
+        seekBarScale.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) {
+                    val scale = 2.0f + (progress / 100f) * 6.0f // 2mm to 8mm
+                    tvScaleValue.text = String.format("%.1fmm", scale)
+
+                    selectedBracketId?.let { bracketId ->
+                        bracketTransforms[bracketId]?.let { transform ->
+                            toothDetector.scaleBracket(transform, scale / transform.scale)
+                            updateSelectedBracketTransform(bracketId, transform)
+                        }
+                    }
+                }
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+
+        btnResetTransform.setOnClickListener {
+            selectedBracketId?.let { bracketId ->
+                resetBracketTransform(bracketId)
+            }
         }
     }
 
@@ -151,7 +213,13 @@ class AdvancedARCameraActivity : AppCompatActivity() {
             if (toothDetector.isUsingPlaceholder()) {
                 Toast.makeText(
                     this,
-                    "Using simulation mode - waiting for trained model",
+                    "Using simulation mode - place your model file in assets/",
+                    Toast.LENGTH_LONG
+                ).show()
+            } else {
+                Toast.makeText(
+                    this,
+                    "Real tooth detection model loaded!",
                     Toast.LENGTH_LONG
                 ).show()
             }
@@ -219,8 +287,6 @@ class AdvancedARCameraActivity : AppCompatActivity() {
             .show()
     }
 
-    // Replace lines 240-260 in AdvancedARCameraActivity.kt with this:
-
     private fun initializeARSession() {
         lifecycleScope.launch {
             try {
@@ -248,14 +314,12 @@ class AdvancedARCameraActivity : AppCompatActivity() {
                     }
                     configure(config)
 
-                    // Get camera intrinsics for ML detector - FIXED
+                    // Get camera intrinsics for ML detector
                     try {
-                        // Update the session to get a frame
                         val frame = update()
                         val camera = frame.camera
 
                         if (camera.trackingState == TrackingState.TRACKING) {
-                            // Get intrinsics from camera
                             val intrinsics = camera.imageIntrinsics
                             val focalLength = intrinsics.focalLength
                             val principalPoint = intrinsics.principalPoint
@@ -267,7 +331,6 @@ class AdvancedARCameraActivity : AppCompatActivity() {
                                 principalPoint[1]
                             )
                         } else {
-                            // Use default values if tracking not ready
                             toothDetector.setCameraIntrinsics(500f, 500f, 320f, 240f)
                         }
                     } catch (e: Exception) {
@@ -370,6 +433,14 @@ class AdvancedARCameraActivity : AppCompatActivity() {
             "No teeth detected - point camera at teeth"
         }
 
+        // Update manipulation info if in manipulation mode
+        if (isManipulationMode) {
+            selectedBracketId?.let { bracketId ->
+                val transform = bracketTransforms[bracketId]
+                tvManipulationInfo.text = "Selected: $bracketId | Size: ${String.format("%.1f", transform?.scale ?: 0f)}mm"
+            }
+        }
+
         // Update feedback for placed brackets
         val placedBrackets = arRenderer.getPlacedBrackets()
         val bestFeedback = placedBrackets.values.mapNotNull { it.positionFeedback }.minByOrNull { it.distance }
@@ -382,27 +453,63 @@ class AdvancedARCameraActivity : AppCompatActivity() {
                 else -> "#F44336"
             }
 
-            tvInstructions.text = android.text.Html.fromHtml(
-                "<font color='$color'>${feedback.guidance}</font>",
-                android.text.Html.FROM_HTML_MODE_LEGACY
-            )
+            if (!isManipulationMode) {
+                tvInstructions.text = android.text.Html.fromHtml(
+                    "<font color='$color'>${feedback.guidance}</font>",
+                    android.text.Html.FROM_HTML_MODE_LEGACY
+                )
+            }
         }
     }
 
     private fun handleTouch(event: MotionEvent) {
-        if (event.action == MotionEvent.ACTION_DOWN) {
-            val currentTime = System.currentTimeMillis()
-            if (currentTime - lastTapTime < TAP_THRESHOLD) {
-                return // Ignore double tap
+        when (event.action and MotionEvent.ACTION_MASK) {
+            MotionEvent.ACTION_DOWN -> {
+                handleSingleTouch(event)
             }
-            lastTapTime = currentTime
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                if (event.pointerCount == 2 && isManipulationMode && selectedBracketId != null) {
+                    // Start two-finger gesture
+                    initialDistance = getDistance(event)
+                    isScaling = true
+                }
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (isManipulationMode && selectedBracketId != null) {
+                    if (event.pointerCount == 1) {
+                        handleSingleFingerMove(event)
+                    } else if (event.pointerCount == 2) {
+                        handleTwoFingerMove(event)
+                    }
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> {
+                isScaling = false
+                isRotating = false
+            }
+        }
 
-            val x = event.x
-            val y = event.y
+        lastTouchX = event.x
+        lastTouchY = event.y
+    }
 
-            // Hit test on detected teeth
+    private fun handleSingleTouch(event: MotionEvent) {
+        val currentTime = System.currentTimeMillis()
+        if (currentTime - lastTapTime < TAP_THRESHOLD) {
+            return // Ignore double tap
+        }
+        lastTapTime = currentTime
+
+        val x = event.x
+        val y = event.y
+
+        if (isManipulationMode) {
+            // Select bracket for manipulation
+            val hitBracket = arRenderer.hitTestBracket(x, y, surfaceView.width, surfaceView.height)
+            selectBracket(hitBracket)
+        } else {
+            // Place new bracket
             val hitTooth = arRenderer.hitTestTooth(x, y, surfaceView.width, surfaceView.height)
-
             if (hitTooth != null) {
                 showBracketPlacementDialog(hitTooth)
             } else {
@@ -411,10 +518,123 @@ class AdvancedARCameraActivity : AppCompatActivity() {
         }
     }
 
+    private fun handleSingleFingerMove(event: MotionEvent) {
+        val deltaX = event.x - lastTouchX
+        val deltaY = event.y - lastTouchY
+
+        selectedBracketId?.let { bracketId ->
+            bracketTransforms[bracketId]?.let { transform ->
+                // Rotate bracket based on finger movement
+                val rotationX = deltaY * ROTATION_SCALE
+                val rotationY = deltaX * ROTATION_SCALE
+
+                toothDetector.rotateBracket(transform, rotationX, rotationY, 0f)
+                updateSelectedBracketTransform(bracketId, transform)
+            }
+        }
+    }
+
+    private fun handleTwoFingerMove(event: MotionEvent) {
+        if (event.pointerCount != 2) return
+
+        val currentDistance = getDistance(event)
+
+        selectedBracketId?.let { bracketId ->
+            bracketTransforms[bracketId]?.let { transform ->
+                if (isScaling) {
+                    // Scale based on pinch gesture
+                    val scaleFactor = 1.0f + (currentDistance - initialDistance) * SCALE_SENSITIVITY
+                    toothDetector.scaleBracket(transform, scaleFactor)
+                    updateSelectedBracketTransform(bracketId, transform)
+
+                    // Update scale slider
+                    val progress = ((transform.scale - 2.0f) / 6.0f * 100).toInt().coerceIn(0, 100)
+                    seekBarScale.progress = progress
+                    tvScaleValue.text = String.format("%.1fmm", transform.scale)
+                }
+            }
+        }
+
+        initialDistance = currentDistance
+    }
+
+    private fun getDistance(event: MotionEvent): Float {
+        val dx = event.getX(0) - event.getX(1)
+        val dy = event.getY(0) - event.getY(1)
+        return sqrt(dx * dx + dy * dy)
+    }
+
+    private fun selectBracket(bracketId: String?) {
+        selectedBracketId = bracketId
+
+        if (bracketId != null) {
+            // Initialize transform if not exists
+            if (!bracketTransforms.containsKey(bracketId)) {
+                val bracket = arRenderer.getPlacedBrackets()[bracketId]
+                bracket?.let {
+                    val position = AdvancedToothDetector.Vector3(
+                        it.modelMatrix[12],
+                        it.modelMatrix[13],
+                        it.modelMatrix[14]
+                    )
+                    bracketTransforms[bracketId] = toothDetector.createBracketTransform(position)
+                }
+            }
+
+            // Update UI
+            val transform = bracketTransforms[bracketId]
+            transform?.let {
+                val progress = ((it.scale - 2.0f) / 6.0f * 100).toInt().coerceIn(0, 100)
+                seekBarScale.progress = progress
+                tvScaleValue.text = String.format("%.1fmm", it.scale)
+            }
+
+            Toast.makeText(this, "Selected bracket on tooth ${bracketId}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun updateSelectedBracketTransform(bracketId: String, transform: AdvancedToothDetector.BracketTransform) {
+        // Update the renderer with new transform
+        arRenderer.updateBracketTransform(bracketId, transform)
+    }
+
+    private fun resetBracketTransform(bracketId: String) {
+        bracketTransforms[bracketId]?.let { transform ->
+            transform.rotation = AdvancedToothDetector.Vector3(0f, 0f, 0f)
+            transform.scale = AdvancedToothDetector.DEFAULT_BRACKET_SIZE
+
+            updateSelectedBracketTransform(bracketId, transform)
+
+            // Reset UI
+            seekBarScale.progress = 50
+            tvScaleValue.text = String.format("%.1fmm", transform.scale)
+
+            Toast.makeText(this, "Bracket transform reset", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun toggleManipulationMode() {
+        isManipulationMode = !isManipulationMode
+
+        if (isManipulationMode) {
+            btnManipulateMode.text = "Place Mode"
+            layoutManipulation.visibility = View.VISIBLE
+            tvInstructions.text = "Manipulation mode: Tap bracket to select, drag to rotate, pinch to scale"
+            tvManipulationInfo.visibility = View.VISIBLE
+        } else {
+            btnManipulateMode.text = "Edit Mode"
+            layoutManipulation.visibility = View.GONE
+            tvInstructions.text = "Point camera at teeth. Tap to place bracket."
+            tvManipulationInfo.visibility = View.GONE
+            selectedBracketId = null
+        }
+    }
+
     private fun showBracketPlacementDialog(tooth: AdvancedToothDetector.DetectedTooth) {
         val message = """
             Tooth: ${tooth.toothId}
             Confidence: ${String.format("%.1f%%", tooth.confidence * 100)}
+            Class: ${tooth.toothClass}
             
             Place bracket on this tooth?
         """.trimIndent()
@@ -445,6 +665,9 @@ class AdvancedARCameraActivity : AppCompatActivity() {
                 // Add to renderer
                 arRenderer.addBracket(bracketId, anchor, tooth.toothId)
 
+                // Initialize transform
+                bracketTransforms[bracketId] = toothDetector.createBracketTransform(optimalPos)
+
                 // Save placement data
                 val placement = BracketPlacement(
                     id = bracketId,
@@ -460,6 +683,7 @@ class AdvancedARCameraActivity : AppCompatActivity() {
                 updatePlacementCount()
                 btnSaveSession.isEnabled = true
                 btnUndo.isEnabled = true
+                btnManipulateMode.isEnabled = true
 
                 // Haptic feedback
                 vibrateOnPlacement()
@@ -482,10 +706,17 @@ class AdvancedARCameraActivity : AppCompatActivity() {
 
         val lastPlacement = bracketPlacements.removeAt(bracketPlacements.size - 1)
         arRenderer.removeBracket(lastPlacement.id)
+        bracketTransforms.remove(lastPlacement.id)
+
+        // Clear selection if it was the removed bracket
+        if (selectedBracketId == lastPlacement.id) {
+            selectedBracketId = null
+        }
 
         updatePlacementCount()
         btnSaveSession.isEnabled = bracketPlacements.isNotEmpty()
         btnUndo.isEnabled = bracketPlacements.isNotEmpty()
+        btnManipulateMode.isEnabled = bracketPlacements.isNotEmpty()
 
         Toast.makeText(this, "Bracket removed", Toast.LENGTH_SHORT).show()
     }
