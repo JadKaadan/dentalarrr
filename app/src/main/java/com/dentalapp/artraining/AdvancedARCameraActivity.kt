@@ -155,35 +155,47 @@ class AdvancedARCameraActivity : AppCompatActivity() {
     }
 
     private fun setupManipulationControls() {
-        seekBarScale = findViewById(R.id.seekbar_scale)
-        btnResetTransform = findViewById(R.id.btn_reset_transform)
-        tvScaleValue = findViewById(R.id.tv_scale_value)
+        try {
+            seekBarScale = findViewById(R.id.seekbar_scale)
+            btnResetTransform = findViewById(R.id.btn_reset_transform)
+            tvScaleValue = findViewById(R.id.tv_scale_value)
 
-        // Scale control
-        seekBarScale.max = 100
-        seekBarScale.progress = 50 // Default size
-        seekBarScale.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                if (fromUser) {
-                    val scale = 2.0f + (progress / 100f) * 6.0f // 2mm to 8mm
-                    tvScaleValue.text = String.format("%.1fmm", scale)
+            // Check if views were found
+            if (seekBarScale == null || btnResetTransform == null || tvScaleValue == null) {
+                Log.e(TAG, "Some manipulation control views not found in layout")
+                return
+            }
 
-                    selectedBracketId?.let { bracketId ->
-                        bracketTransforms[bracketId]?.let { transform ->
-                            toothDetector.scaleBracket(transform, scale / transform.scale)
-                            updateSelectedBracketTransform(bracketId, transform)
+            // Scale control
+            seekBarScale.max = 100
+            seekBarScale.progress = 50 // Default size
+            seekBarScale.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                    if (fromUser) {
+                        val scale = 2.0f + (progress / 100f) * 6.0f // 2mm to 8mm
+                        tvScaleValue.text = String.format("%.1fmm", scale)
+
+                        selectedBracketId?.let { bracketId ->
+                            bracketTransforms[bracketId]?.let { transform ->
+                                toothDetector.scaleBracket(transform, scale / transform.scale)
+                                updateSelectedBracketTransform(bracketId, transform)
+                            }
                         }
                     }
                 }
-            }
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
-        })
+                override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+            })
 
-        btnResetTransform.setOnClickListener {
-            selectedBracketId?.let { bracketId ->
-                resetBracketTransform(bracketId)
+            btnResetTransform.setOnClickListener {
+                selectedBracketId?.let { bracketId ->
+                    resetBracketTransform(bracketId)
+                }
             }
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to setup manipulation controls", e)
+            // Continue without manipulation controls
         }
     }
 
@@ -192,16 +204,42 @@ class AdvancedARCameraActivity : AppCompatActivity() {
             try {
                 showProgress(true, "Loading 3D model...")
 
-                val inputStream = assets.open("models/Bracket.obj")
-                bracketModel = OBJLoader.loadOBJ(inputStream)
+                // Try different possible paths for the model
+                val possiblePaths = listOf(
+                    "models/Bracket.obj",
+                    "models/bracket.obj",
+                    "Bracket.obj",
+                    "bracket.obj"
+                )
 
-                Log.d(TAG, "Bracket model loaded: ${bracketModel?.vertices?.size} vertices")
+                var inputStream: java.io.InputStream? = null
+                var foundPath: String? = null
+
+                for (path in possiblePaths) {
+                    try {
+                        inputStream = assets.open(path)
+                        foundPath = path
+                        break
+                    } catch (e: Exception) {
+                        Log.d(TAG, "Model not found at path: $path")
+                    }
+                }
+
+                if (inputStream != null && foundPath != null) {
+                    bracketModel = OBJLoader.loadOBJ(inputStream)
+                    Log.d(TAG, "Bracket model loaded from $foundPath: ${bracketModel?.vertices?.size} vertices")
+                } else {
+                    Log.w(TAG, "No bracket model found, using default placeholder")
+                    bracketModel = null
+                }
+
                 showProgress(false)
 
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to load bracket model", e)
                 showError("Failed to load 3D bracket model. Using placeholder.")
                 showProgress(false)
+                bracketModel = null // Ensure it's null so we use fallback
             }
         }
     }
@@ -213,21 +251,32 @@ class AdvancedARCameraActivity : AppCompatActivity() {
             if (toothDetector.isUsingPlaceholder()) {
                 Toast.makeText(
                     this,
-                    "Using simulation mode - place your model file in assets/",
+                    "Using simulation mode - ML model not found",
                     Toast.LENGTH_LONG
                 ).show()
+                Log.w(TAG, "Using placeholder tooth detection mode")
             } else {
                 Toast.makeText(
                     this,
                     "Real tooth detection model loaded!",
                     Toast.LENGTH_LONG
                 ).show()
+                Log.d(TAG, "Real tooth detection model loaded successfully")
             }
 
-            Log.d(TAG, "Tooth detector initialized")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to initialize detector", e)
-            showError("ML detector initialization failed")
+            showError("ML detector initialization failed: ${e.message}")
+
+            // Try to continue with a fallback detector
+            try {
+                toothDetector = AdvancedToothDetector(this)
+            } catch (fallbackException: Exception) {
+                Log.e(TAG, "Fallback detector also failed", fallbackException)
+                showError("Complete detector failure. App cannot continue.")
+                finish()
+                return
+            }
         }
     }
 
