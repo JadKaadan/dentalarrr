@@ -33,7 +33,7 @@ class AdvancedToothDetector(private val context: Context) {
         private const val TAG = "AdvancedToothDetector"
 
         // Model configuration - updated for your real model
-        private const val MODEL_FILE = "tooth_detection_yolov8.tflite"
+        private const val MODEL_FILE = "models/tooth_detection_yolov8.tflite"
         private const val MODEL_INPUT_SIZE = 640 // YOLOv8 standard input
 
         // Detection thresholds - tuned for dental detection
@@ -140,8 +140,35 @@ class AdvancedToothDetector(private val context: Context) {
 
     private fun setupInterpreter() {
         try {
-            // Try to load your real model
-            val modelFile = loadModelFile(MODEL_FILE)
+            // Try to load your real model from different possible paths
+            val possibleModelPaths = listOf(
+                "models/tooth_detection_yolov8.tflite",
+                "tooth_detection_yolov8.tflite",
+                "models/tooth_model.tflite",
+                "tooth_model.tflite"
+            )
+
+            var modelFile: MappedByteBuffer? = null
+            var foundPath: String? = null
+
+            for (path in possibleModelPaths) {
+                try {
+                    modelFile = loadModelFile(path)
+                    foundPath = path
+                    Log.d(TAG, "Model found at: $path")
+                    break
+                } catch (e: Exception) {
+                    Log.d(TAG, "Model not found at: $path")
+                }
+            }
+
+            if (modelFile == null) {
+                Log.w(TAG, "No ML model found, using placeholder mode")
+                usePlaceholderMode = true
+                isModelLoaded = true
+                numClasses = 5 // Default for placeholder
+                return
+            }
 
             val compatList = CompatibilityList()
             val options = Interpreter.Options()
@@ -186,28 +213,41 @@ class AdvancedToothDetector(private val context: Context) {
                 }
             }
 
-            Log.d(TAG, "Model loaded: output size=$modelOutputSize, classes=$numClasses")
+            Log.d(TAG, "Model loaded from $foundPath: output size=$modelOutputSize, classes=$numClasses")
 
             isModelLoaded = true
             usePlaceholderMode = false
 
-            Log.d(TAG, "Real YOLOv8 model loaded successfully")
-
         } catch (e: Exception) {
-            Log.w(TAG, "Real model not found, using placeholder mode: ${e.message}")
+            Log.w(TAG, "Real model setup failed, using placeholder mode: ${e.message}")
             usePlaceholderMode = true
             isModelLoaded = true
             numClasses = 5 // Default for placeholder
+
+            // Clean up any partially initialized components
+            try {
+                interpreter?.close()
+                gpuDelegate?.close()
+            } catch (cleanupException: Exception) {
+                Log.w(TAG, "Cleanup exception during fallback", cleanupException)
+            }
+            interpreter = null
+            gpuDelegate = null
         }
     }
 
     private fun loadModelFile(filename: String): MappedByteBuffer {
-        val fileDescriptor = context.assets.openFd(filename)
-        val inputStream = FileInputStream(fileDescriptor.fileDescriptor)
-        val fileChannel = inputStream.channel
-        val startOffset = fileDescriptor.startOffset
-        val declaredLength = fileDescriptor.declaredLength
-        return fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffset, declaredLength)
+        return try {
+            val fileDescriptor = context.assets.openFd(filename)
+            val inputStream = FileInputStream(fileDescriptor.fileDescriptor)
+            val fileChannel = inputStream.channel
+            val startOffset = fileDescriptor.startOffset
+            val declaredLength = fileDescriptor.declaredLength
+            fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffset, declaredLength)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to load model file: $filename", e)
+            throw e
+        }
     }
 
     /**
