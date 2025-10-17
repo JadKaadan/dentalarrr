@@ -219,6 +219,8 @@ class AdvancedARCameraActivity : AppCompatActivity() {
             .show()
     }
 
+    // Replace lines 240-260 in AdvancedARCameraActivity.kt with this:
+
     private fun initializeARSession() {
         lifecycleScope.launch {
             try {
@@ -246,15 +248,32 @@ class AdvancedARCameraActivity : AppCompatActivity() {
                     }
                     configure(config)
 
-                    // Get camera intrinsics for ML detector
-                    val camera = this.cameraConfig
-                    val intrinsics = camera.textureIntrinsics
-                    toothDetector.setCameraIntrinsics(
-                        intrinsics.focalLength[0],
-                        intrinsics.focalLength[1],
-                        intrinsics.principalPoint[0],
-                        intrinsics.principalPoint[1]
-                    )
+                    // Get camera intrinsics for ML detector - FIXED
+                    try {
+                        // Update the session to get a frame
+                        val frame = update()
+                        val camera = frame.camera
+
+                        if (camera.trackingState == TrackingState.TRACKING) {
+                            // Get intrinsics from camera
+                            val intrinsics = camera.imageIntrinsics
+                            val focalLength = intrinsics.focalLength
+                            val principalPoint = intrinsics.principalPoint
+
+                            toothDetector.setCameraIntrinsics(
+                                focalLength[0],
+                                focalLength[1],
+                                principalPoint[0],
+                                principalPoint[1]
+                            )
+                        } else {
+                            // Use default values if tracking not ready
+                            toothDetector.setCameraIntrinsics(500f, 500f, 320f, 240f)
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Could not get camera intrinsics, using defaults", e)
+                        toothDetector.setCameraIntrinsics(500f, 500f, 320f, 240f)
+                    }
                 }
 
                 // Initialize renderer
