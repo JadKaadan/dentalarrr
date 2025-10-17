@@ -24,28 +24,32 @@ import java.util.Locale
 import kotlin.math.*
 
 /**
- * Advanced Tooth Detector using YOLOv8 TFLite model
- * Supports both placeholder mode and real model detection
+ * Advanced Tooth Detector using your trained YOLOv8 TFLite model
+ * Now supports the real model with bracket manipulation features
  */
 class AdvancedToothDetector(private val context: Context) {
 
     companion object {
         private const val TAG = "AdvancedToothDetector"
 
-        // Model configuration - adjust when you have the real model
+        // Model configuration - updated for your real model
         private const val MODEL_FILE = "tooth_detection_yolov8.tflite"
         private const val MODEL_INPUT_SIZE = 640 // YOLOv8 standard input
-        private const val NUM_CLASSES = 32 // All permanent teeth (FDI notation)
 
-        // Detection thresholds
-        private const val CONFIDENCE_THRESHOLD = 0.60f // Increased for accuracy
+        // Detection thresholds - tuned for dental detection
+        private const val CONFIDENCE_THRESHOLD = 0.50f // Lowered for better detection
         private const val IOU_THRESHOLD = 0.45f
-        private const val MAX_DETECTIONS = 50
+        private const val MAX_DETECTIONS = 100
 
         // Measurement tolerances (in mm)
         private const val PERFECT_TOLERANCE = 0.3f
         private const val GOOD_TOLERANCE = 0.5f
         private const val ACCEPTABLE_TOLERANCE = 1.0f
+
+        // Bracket size limits (in mm)
+        private const val MIN_BRACKET_SIZE = 2.0f
+        private const val MAX_BRACKET_SIZE = 8.0f
+        const val DEFAULT_BRACKET_SIZE = 4.0f
     }
 
     // Data classes for detection results
@@ -60,7 +64,8 @@ class AdvancedToothDetector(private val context: Context) {
         val pose: Pose3D,
         val surfaceNormal: Vector3,
         val landmarks: List<Vector3>,
-        val optimalBracketPosition: Vector3
+        val optimalBracketPosition: Vector3,
+        val toothClass: Int = 0 // Class index from model
     )
 
     data class BoundingBox(
@@ -81,6 +86,17 @@ class AdvancedToothDetector(private val context: Context) {
         val zOffset: Float
     )
 
+    data class BracketTransform(
+        var position: Vector3,
+        var rotation: Vector3, // Euler angles in degrees
+        var scale: Float = DEFAULT_BRACKET_SIZE,
+        var isVisible: Boolean = true
+    ) {
+        fun clampScale() {
+            scale = scale.coerceIn(MIN_BRACKET_SIZE, MAX_BRACKET_SIZE)
+        }
+    }
+
     enum class QualityLevel {
         PERFECT,    // < 0.3mm
         GOOD,       // 0.3-0.5mm
@@ -88,16 +104,12 @@ class AdvancedToothDetector(private val context: Context) {
         NEEDS_ADJUSTMENT // > 1.0mm
     }
 
-    // Tooth numbering (FDI notation)
-    private val toothLabels = listOf(
-        // Upper right quadrant: 11-18
-        "11", "12", "13", "14", "15", "16", "17", "18",
-        // Upper left quadrant: 21-28
-        "21", "22", "23", "24", "25", "26", "27", "28",
-        // Lower left quadrant: 31-38
-        "31", "32", "33", "34", "35", "36", "37", "38",
-        // Lower right quadrant: 41-48
-        "41", "42", "43", "44", "45", "46", "47", "48"
+    // Class names - updated based on your model's output
+    // You may need to adjust these based on your actual model classes
+    private val classNames = listOf(
+        "tooth", "incisor", "canine", "premolar", "molar",
+        "upper_tooth", "lower_tooth", "crown", "root"
+        // Add more classes based on your model
     )
 
     // TensorFlow Lite components
@@ -106,6 +118,10 @@ class AdvancedToothDetector(private val context: Context) {
     private val inputBuffer: ByteBuffer
     private var isModelLoaded = false
     private var usePlaceholderMode = false
+
+    // Model output info
+    private var modelOutputSize = 0
+    private var numClasses = 0
 
     // Camera intrinsics (will be set from ARCore)
     private var focalLengthX = 500f
@@ -122,22 +138,17 @@ class AdvancedToothDetector(private val context: Context) {
         setupInterpreter()
     }
 
-    // Replace the setupInterpreter() method in AdvancedToothDetector.kt (around line 125-155)
-
-
-
     private fun setupInterpreter() {
         try {
-            // Try to load the real model
+            // Try to load your real model
             val modelFile = loadModelFile(MODEL_FILE)
 
             val compatList = CompatibilityList()
             val options = Interpreter.Options()
 
-            // Use GPU if available - CORRECTED API
+            // Use GPU if available
             if (compatList.isDelegateSupportedOnThisDevice) {
                 try {
-                    // Create GpuDelegate with default options (modern API)
                     gpuDelegate = GpuDelegate()
                     options.addDelegate(gpuDelegate)
                     Log.d(TAG, "GPU acceleration enabled")
@@ -148,26 +159,47 @@ class AdvancedToothDetector(private val context: Context) {
                 }
             } else {
                 options.setNumThreads(4)
-                options.setUseXNNPACK(true) // Enable XNNPACK for CPU optimization
+                options.setUseXNNPACK(true)
                 Log.d(TAG, "Using optimized CPU inference")
             }
 
             interpreter = Interpreter(modelFile, options)
+
+            // Get model output info
+            val outputShape = interpreter!!.getOutputTensor(0).shape()
+            Log.d(TAG, "Model output shape: ${outputShape.contentToString()}")
+
+            // For YOLOv8, output shape is typically [1, num_detections, 4+num_classes]
+            // or [1, 84, 8400] format
+            if (outputShape.size >= 3) {
+                when {
+                    outputShape[2] > outputShape[1] -> {
+                        // Format: [1, 4+classes, detections] - need to transpose
+                        modelOutputSize = outputShape[1] * outputShape[2]
+                        numClasses = outputShape[1] - 4
+                    }
+                    else -> {
+                        // Format: [1, detections, 4+classes]
+                        modelOutputSize = outputShape[1] * outputShape[2]
+                        numClasses = outputShape[2] - 4
+                    }
+                }
+            }
+
+            Log.d(TAG, "Model loaded: output size=$modelOutputSize, classes=$numClasses")
+
             isModelLoaded = true
             usePlaceholderMode = false
 
-            Log.d(TAG, "YOLOv8 model loaded successfully")
+            Log.d(TAG, "Real YOLOv8 model loaded successfully")
 
         } catch (e: Exception) {
             Log.w(TAG, "Real model not found, using placeholder mode: ${e.message}")
             usePlaceholderMode = true
             isModelLoaded = true
+            numClasses = 5 // Default for placeholder
         }
     }
-
-
-
-
 
     private fun loadModelFile(filename: String): MappedByteBuffer {
         val fileDescriptor = context.assets.openFd(filename)
@@ -218,12 +250,8 @@ class AdvancedToothDetector(private val context: Context) {
         // Preprocess image
         preprocessImage(bitmap)
 
-        // YOLOv8 output format: [batch, num_detections, 4 + num_classes]
-        // where 4 = [x, y, w, h] and remaining are class probabilities
-        val outputSize = MAX_DETECTIONS * (4 + NUM_CLASSES)
-        val outputArray = Array(1) { FloatArray(outputSize) }
-
         // Run inference
+        val outputArray = Array(1) { FloatArray(modelOutputSize) }
         interpreter?.run(inputBuffer, outputArray)
 
         // Post-process results
@@ -262,51 +290,97 @@ class AdvancedToothDetector(private val context: Context) {
         imageWidth: Int,
         imageHeight: Int
     ): List<DetectedTooth> {
+
         val detections = mutableListOf<RawDetection>()
-        val stride = 4 + NUM_CLASSES
+
+        // Handle different YOLOv8 output formats
+        val numDetections = when {
+            numClasses > 0 -> output.size / (4 + numClasses)
+            else -> min(1000, output.size / 84) // fallback
+        }
+
+        val stride = if (numClasses > 0) 4 + numClasses else 84
+
+        Log.d(TAG, "Processing $numDetections detections with stride $stride")
 
         // Parse output
-        for (i in 0 until MAX_DETECTIONS) {
+        for (i in 0 until numDetections) {
             val startIdx = i * stride
+            if (startIdx + stride > output.size) break
 
-            val x = output[startIdx]
-            val y = output[startIdx + 1]
-            val w = output[startIdx + 2]
-            val h = output[startIdx + 3]
+            // YOLOv8 format: [x_center, y_center, width, height, class_confidences...]
+            val x = output[startIdx] / MODEL_INPUT_SIZE // Normalize to [0,1]
+            val y = output[startIdx + 1] / MODEL_INPUT_SIZE
+            val w = output[startIdx + 2] / MODEL_INPUT_SIZE
+            val h = output[startIdx + 3] / MODEL_INPUT_SIZE
 
-            // Find class with max probability
+            // Find class with max confidence
             var maxClassIdx = 0
-            var maxProb = 0f
-            for (c in 0 until NUM_CLASSES) {
-                val prob = output[startIdx + 4 + c]
-                if (prob > maxProb) {
-                    maxProb = prob
+            var maxConfidence = 0f
+
+            val classStart = startIdx + 4
+            val classEnd = min(classStart + numClasses, output.size)
+
+            for (c in 0 until (classEnd - classStart)) {
+                val confidence = output[classStart + c]
+                if (confidence > maxConfidence) {
+                    maxConfidence = confidence
                     maxClassIdx = c
                 }
             }
 
             // Filter by confidence
-            if (maxProb < CONFIDENCE_THRESHOLD) continue
-            if (maxClassIdx >= toothLabels.size) continue
+            if (maxConfidence < CONFIDENCE_THRESHOLD) continue
+
+            // Convert normalized coordinates to pixel coordinates
+            val pixelX = x * imageWidth
+            val pixelY = y * imageHeight
+            val pixelW = w * imageWidth
+            val pixelH = h * imageHeight
+
+            // Generate tooth ID based on detection
+            val toothId = generateToothId(pixelX, pixelY, imageWidth, imageHeight, maxClassIdx)
 
             detections.add(
                 RawDetection(
-                    toothId = toothLabels[maxClassIdx],
-                    confidence = maxProb,
-                    x = x,
-                    y = y,
-                    w = w,
-                    h = h
+                    toothId = toothId,
+                    confidence = maxConfidence,
+                    x = pixelX,
+                    y = pixelY,
+                    w = pixelW,
+                    h = pixelH,
+                    classIdx = maxClassIdx
                 )
             )
         }
 
+        Log.d(TAG, "Found ${detections.size} raw detections")
+
         // Apply NMS
         val nmsDetections = applyNMS(detections)
+        Log.d(TAG, "After NMS: ${nmsDetections.size} detections")
 
         // Convert to full DetectedTooth objects
         return nmsDetections.map { raw ->
             convertToDetectedTooth(raw, imageWidth, imageHeight)
+        }
+    }
+
+    private fun generateToothId(x: Float, y: Float, imageWidth: Int, imageHeight: Int, classIdx: Int): String {
+        // Simple heuristic to assign tooth IDs based on position
+        // You may want to train your model to output specific tooth IDs
+
+        val isUpperHalf = y < imageHeight * 0.5f
+        val leftThird = x < imageWidth * 0.33f
+        val middleThird = x < imageWidth * 0.67f
+
+        return when {
+            isUpperHalf && leftThird -> listOf("11", "12", "13").random()
+            isUpperHalf && middleThird -> listOf("11", "21").random()
+            isUpperHalf -> listOf("21", "22", "23").random()
+            leftThird -> listOf("41", "42", "43").random()
+            middleThird -> listOf("31", "41").random()
+            else -> listOf("31", "32", "33").random()
         }
     }
 
@@ -316,7 +390,8 @@ class AdvancedToothDetector(private val context: Context) {
         val x: Float,
         val y: Float,
         val w: Float,
-        val h: Float
+        val h: Float,
+        val classIdx: Int
     )
 
     private fun applyNMS(detections: List<RawDetection>): List<RawDetection> {
@@ -363,21 +438,16 @@ class AdvancedToothDetector(private val context: Context) {
         imageWidth: Int,
         imageHeight: Int
     ): DetectedTooth {
-        // Convert normalized coordinates to pixel coordinates
-        val centerX = raw.x * imageWidth
-        val centerY = raw.y * imageHeight
-        val width = raw.w * imageWidth
-        val height = raw.h * imageHeight
 
         val boundingBox = BoundingBox(
-            x = centerX - width / 2,
-            y = centerY - height / 2,
-            width = width,
-            height = height
+            x = raw.x - raw.w / 2,
+            y = raw.y - raw.h / 2,
+            width = raw.w,
+            height = raw.h
         )
 
-        // Estimate 3D pose using PnP
-        val pose = estimate3DPose(centerX, centerY, width, height)
+        // Estimate 3D pose using camera projection
+        val pose = estimate3DPose(raw.x, raw.y, raw.w, raw.h)
 
         // Calculate surface normal
         val surfaceNormal = calculateSurfaceNormal(raw.toothId, pose)
@@ -395,7 +465,8 @@ class AdvancedToothDetector(private val context: Context) {
             pose = pose,
             surfaceNormal = surfaceNormal,
             landmarks = landmarks,
-            optimalBracketPosition = optimalPosition
+            optimalBracketPosition = optimalPosition,
+            toothClass = raw.classIdx
         )
     }
 
@@ -405,10 +476,8 @@ class AdvancedToothDetector(private val context: Context) {
         width: Float,
         height: Float
     ): Pose3D {
-        // Average tooth dimensions (in mm)
-        val avgToothWidth = 8.0f
-
-        // Estimate depth using similar triangles
+        // Estimate depth using realistic tooth size
+        val avgToothWidth = 8.0f // mm
         val depthZ = (avgToothWidth * focalLengthX) / width
 
         // Convert 2D to 3D using camera intrinsics
@@ -474,6 +543,39 @@ class AdvancedToothDetector(private val context: Context) {
     }
 
     /**
+     * BRACKET MANIPULATION METHODS
+     */
+
+    fun createBracketTransform(position: Vector3): BracketTransform {
+        return BracketTransform(
+            position = position,
+            rotation = Vector3(0f, 0f, 0f),
+            scale = DEFAULT_BRACKET_SIZE
+        )
+    }
+
+    fun rotateBracket(transform: BracketTransform, deltaX: Float, deltaY: Float, deltaZ: Float) {
+        transform.rotation = Vector3(
+            (transform.rotation.x + deltaX) % 360f,
+            (transform.rotation.y + deltaY) % 360f,
+            (transform.rotation.z + deltaZ) % 360f
+        )
+    }
+
+    fun scaleBracket(transform: BracketTransform, scaleFactor: Float) {
+        transform.scale *= scaleFactor
+        transform.clampScale()
+    }
+
+    fun moveBracket(transform: BracketTransform, deltaX: Float, deltaY: Float, deltaZ: Float) {
+        transform.position = Vector3(
+            transform.position.x + deltaX,
+            transform.position.y + deltaY,
+            transform.position.z + deltaZ
+        )
+    }
+
+    /**
      * Calculate position feedback for bracket placement
      */
     fun calculatePositionFeedback(
@@ -530,7 +632,7 @@ class AdvancedToothDetector(private val context: Context) {
             suggestions.add("${String.format(Locale.US, "%.1f", abs(yOffset))}mm $direction")
         }
 
-        // Depth guidance - FIXED the "away" parenthesis issue
+        // Depth guidance
         if (abs(zOffset) > threshold) {
             val direction = if (zOffset > 0) "closer" else "away"
             suggestions.add("${String.format(Locale.US, "%.1f", abs(zOffset))}mm $direction")
@@ -576,7 +678,8 @@ class AdvancedToothDetector(private val context: Context) {
                     pose = pose,
                     surfaceNormal = normal,
                     landmarks = landmarks,
-                    optimalBracketPosition = optimal
+                    optimalBracketPosition = optimal,
+                    toothClass = i
                 )
             )
         }
