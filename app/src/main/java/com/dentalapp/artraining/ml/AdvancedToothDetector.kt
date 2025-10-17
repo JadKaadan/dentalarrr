@@ -20,6 +20,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.MappedByteBuffer
 import java.nio.channels.FileChannel
+import java.util.Locale
 import kotlin.math.*
 
 /**
@@ -121,6 +122,10 @@ class AdvancedToothDetector(private val context: Context) {
         setupInterpreter()
     }
 
+    // Replace the setupInterpreter() method in AdvancedToothDetector.kt (around line 125-155)
+
+
+
     private fun setupInterpreter() {
         try {
             // Try to load the real model
@@ -129,16 +134,18 @@ class AdvancedToothDetector(private val context: Context) {
             val compatList = CompatibilityList()
             val options = Interpreter.Options()
 
-            // Use GPU if available
+            // Use GPU if available - CORRECTED API
             if (compatList.isDelegateSupportedOnThisDevice) {
-                gpuDelegate = GpuDelegate(
-                    GpuDelegate.Options().apply {
-                        setPrecisionLossAllowed(true) // Allow FP16
-                        setInferencePreference(GpuDelegate.Options.INFERENCE_PREFERENCE_SUSTAINED_SPEED)
-                    }
-                )
-                options.addDelegate(gpuDelegate)
-                Log.d(TAG, "GPU acceleration enabled")
+                try {
+                    // Create GpuDelegate with default options (modern API)
+                    gpuDelegate = GpuDelegate()
+                    options.addDelegate(gpuDelegate)
+                    Log.d(TAG, "GPU acceleration enabled")
+                } catch (e: Exception) {
+                    Log.w(TAG, "GPU delegate failed, falling back to CPU", e)
+                    options.setNumThreads(4)
+                    options.setUseXNNPACK(true)
+                }
             } else {
                 options.setNumThreads(4)
                 options.setUseXNNPACK(true) // Enable XNNPACK for CPU optimization
@@ -157,6 +164,10 @@ class AdvancedToothDetector(private val context: Context) {
             isModelLoaded = true
         }
     }
+
+
+
+
 
     private fun loadModelFile(filename: String): MappedByteBuffer {
         val fileDescriptor = context.assets.openFd(filename)
@@ -181,7 +192,7 @@ class AdvancedToothDetector(private val context: Context) {
     /**
      * Main detection method
      */
-    suspend fun detectTeeth(cameraImage: Image): List<DetectedTooth> {
+    fun detectTeeth(cameraImage: Image): List<DetectedTooth> {
         if (!isModelLoaded) {
             Log.w(TAG, "Model not loaded")
             return emptyList()
@@ -510,19 +521,19 @@ class AdvancedToothDetector(private val context: Context) {
         // Horizontal guidance
         if (abs(xOffset) > threshold) {
             val direction = if (xOffset > 0) "left" else "right"
-            suggestions.add("Move ${String.format("%.1f", abs(xOffset))}mm $direction")
+            suggestions.add("Move ${String.format(Locale.US, "%.1f", abs(xOffset))}mm $direction")
         }
 
         // Vertical guidance
         if (abs(yOffset) > threshold) {
             val direction = if (yOffset > 0) "down" else "up"
-            suggestions.add("${String.format("%.1f", abs(yOffset))}mm $direction")
+            suggestions.add("${String.format(Locale.US, "%.1f", abs(yOffset))}mm $direction")
         }
 
-        // Depth guidance
+        // Depth guidance - FIXED the "away" parenthesis issue
         if (abs(zOffset) > threshold) {
-            val direction = if (zOffset > 0) "closer" else "away")
-            suggestions.add("${String.format("%.1f", abs(zOffset))}mm $direction")
+            val direction = if (zOffset > 0) "closer" else "away"
+            suggestions.add("${String.format(Locale.US, "%.1f", abs(zOffset))}mm $direction")
         }
 
         return when {
