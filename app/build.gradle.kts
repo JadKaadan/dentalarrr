@@ -3,7 +3,6 @@ plugins {
     alias(libs.plugins.kotlin.android)
     id("com.google.devtools.ksp")
     id("org.jetbrains.kotlin.kapt")
-
 }
 
 android {
@@ -63,7 +62,6 @@ android {
             excludes += "META-INF/DEPENDENCIES"
         }
     }
-
 }
 
 dependencies {
@@ -74,9 +72,8 @@ dependencies {
     implementation(libs.androidx.activity)
     implementation(libs.androidx.constraintlayout)
 
-    // ARCore
+    // ARCore (ONLY ARCore, removed deprecated Sceneform)
     implementation("com.google.ar:core:1.41.0")
-    implementation("com.google.ar.sceneform:core:1.22.0")
 
     // TensorFlow Lite with GPU support
     implementation("org.tensorflow:tensorflow-lite:2.14.0")
@@ -93,7 +90,6 @@ dependencies {
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
     kapt("androidx.room:room-compiler:2.6.1")
-
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
