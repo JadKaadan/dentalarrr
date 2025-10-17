@@ -55,7 +55,7 @@ class AdvancedARRenderer(
         val id: String,
         val anchor: Anchor,
         val toothId: String,
-        val detectedTooth: AdvancedToothDetector.DetectedTooth?,
+        var detectedTooth: AdvancedToothDetector.DetectedTooth?,
         var modelMatrix: FloatArray = FloatArray(16),
         var positionFeedback: AdvancedToothDetector.PositionFeedback? = null
     )
