@@ -79,12 +79,13 @@ class QRScannerActivity : AppCompatActivity() {
     private fun toggleTorch() {
         try {
             isTorchOn = !isTorchOn
-            barcodeView.setTorchOn()
+            if (isTorchOn) barcodeView.setTorchOn() else barcodeView.setTorchOff()
         } catch (e: Exception) {
             Log.e(TAG, "Failed to toggle torch", e)
             Toast.makeText(this, "Flashlight not available", Toast.LENGTH_SHORT).show()
         }
     }
+
 
     private fun handleQRResult(qrContent: String) {
         Log.d(TAG, "QR Code scanned: $qrContent")
